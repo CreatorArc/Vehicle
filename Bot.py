@@ -9,12 +9,12 @@ from flask import Flask
 import telebot
 from telebot import types
 
-# ----------------- FLASK SERVER FOR RENDER -----------------
+# ----------------- FLASK KEEP-ALIVE SERVER -----------------
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Vehicle RC Finder Bot is running 24/7!"
+    return "Vehicle RC Auto-Payment Bot is running 24/7!"
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -26,13 +26,15 @@ threading.Thread(target=run_flask).start()
 BOT_TOKEN = "8834683428:AAGlWn91Xj4UjCu6pEVyuLoSWaU_SLjmS00"
 ADMIN_ID = 8800158361
 
+PAYTM_MID = "FdGQlV45296340803916"
+PAYTM_UPI = "paytmqr2810050501011gv6cueh16my@paytm"
+
+QR_API_URL = "https://paytms.aimbotaxe4.workers.dev"
+VERIFY_API_URL = "https://paytmv.aimbotaxe4.workers.dev"
 VEHICLE_API = "https://vehicle-chass.vercel.app/api/vehicle?rc="
-UPI_QR_PHOTO_URL = "https://t.me/shjahshsbsb/5"
-UPI_ID = "paytmqr2810050501011gv6cueh16my@paytm"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 bot.remove_webhook()
-waiting_screenshot = set()
 
 # ----------------- DATABASE SETUP -----------------
 conn = sqlite3.connect("bot_data.db", check_same_thread=False)
@@ -50,6 +52,16 @@ cursor.execute("""
         code TEXT PRIMARY KEY,
         points INTEGER,
         is_used INTEGER DEFAULT 0
+    )
+""")
+
+cursor.execute("""
+    CREATE TABLE IF NOT EXISTS processed_orders (
+        order_id TEXT PRIMARY KEY,
+        user_id INTEGER,
+        amount REAL,
+        points INTEGER,
+        created_at TEXT
     )
 """)
 conn.commit()
@@ -70,7 +82,55 @@ def update_user_credits(user_id, delta):
     conn.commit()
     return new_bal
 
-# ----------------- VEHICLE API FUNCTIONS -----------------
+# ----------------- AUTO QR GENERATION -----------------
+def generate_paytm_qr(user_id, amount=5):
+    try:
+        url = f"{QR_API_URL}/?id={PAYTM_MID}&upi={PAYTM_UPI}&amount={amount}"
+        response = requests.post(url, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('status') == 'success':
+                return data.get('qrImageUrl'), data.get('trackId')
+    except Exception as e:
+        print(f"QR Gen Error: {e}")
+    return None, None
+
+def send_auto_qr_screen(chat_id, message_id=None, amount=5):
+    qr_url, order_id = generate_paytm_qr(chat_id, amount)
+    if not qr_url:
+        bot.send_message(chat_id, "❌ QR generate karne me samasya aayi. Kripya thodi der baad prayas karein.")
+        return
+
+    short_id = order_id[-6:] if len(order_id) >= 6 else order_id
+
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    btn_paid = types.InlineKeyboardButton("✅ Paid", callback_data=f"checkpay_{order_id}")
+    btn_new = types.InlineKeyboardButton("🔁 New QR", callback_data="gena_qr")
+    markup.add(btn_paid, btn_new)
+
+    caption = (
+        f"💳 *Scan & Pay {amount}₹ on this QR Code*\n\n"
+        "⚡ _Payment karne ke baad neeche '✅ Paid' button dabayein._\n"
+        "Credits aapke wallet me automatically add ho jayenge!\n\n"
+        f"🆔 *Order ID:* `...{short_id}`\n"
+        f"💰 *Rate:* 5₹ = 1 Search Credit"
+    )
+
+    if message_id:
+        try:
+            bot.edit_message_media(
+                chat_id=chat_id,
+                message_id=message_id,
+                media=types.InputMediaPhoto(media=qr_url, caption=caption, parse_mode="Markdown"),
+                reply_markup=markup
+            )
+            return
+        except Exception:
+            pass
+
+    bot.send_photo(chat_id, qr_url, caption=caption, parse_mode="Markdown", reply_markup=markup)
+
+# ----------------- VEHICLE SCRAPER LOGIC -----------------
 def safe_get(d, key, default='N/A'):
     val = d.get(key, '')
     return default if (val == '' or val is None) else str(val)
@@ -171,33 +231,12 @@ def get_mobile(rc, last5):
 
     return {'success': False, 'mobile': 'Not Available', 'chassis_last5': last5}
 
-# ----------------- UI / PAYMENT SCREENS -----------------
-def send_payment_screen(chat_id):
-    markup = types.InlineKeyboardMarkup()
-    btn_upload = types.InlineKeyboardButton("📤 Send Payment Screenshot", callback_data="upload_proof")
-    markup.add(btn_upload)
-
-    caption = (
-        "💳 *Recharge Search Credits:*\n\n"
-        "• 1 Search = 5₹\n"
-        "• 5 Searches = 25₹\n"
-        "• 10 Searches = 50₹\n\n"
-        f"💳 *UPI ID:* `{UPI_ID}`\n(Tap to copy)\n\n"
-        "📌 *Steps:*\n"
-        "1. Upar diye QR par payment karein.\n"
-        "2. Payment ke baad neeche 'Send Payment Screenshot' dabayein."
-    )
-    try:
-        bot.send_photo(chat_id, UPI_QR_PHOTO_URL, caption=caption, parse_mode="Markdown", reply_markup=markup)
-    except Exception:
-        bot.send_message(chat_id, f"{caption}\n\n🖼️ [View QR Code]({UPI_QR_PHOTO_URL})", parse_mode="Markdown", reply_markup=markup)
-
-# ----------------- USER COMMANDS -----------------
+# ----------------- BOT COMMANDS -----------------
 @bot.message_handler(commands=['start'])
 def start_msg(message):
     credits = get_user_credits(message.chat.id)
     markup = types.InlineKeyboardMarkup(row_width=2)
-    btn_recharge = types.InlineKeyboardButton("💳 Buy Credits (QR)", callback_data="buy_credits")
+    btn_recharge = types.InlineKeyboardButton("💳 Auto Recharge (QR)", callback_data="gena_qr")
     btn_bal = types.InlineKeyboardButton(f"💰 Balance: {credits} Searches", callback_data="check_balance")
     markup.add(btn_recharge, btn_bal)
 
@@ -211,21 +250,96 @@ def start_msg(message):
     )
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda call: call.data == "buy_credits")
-def buy_callback(call):
-    send_payment_screen(call.message.chat.id)
-    bot.answer_callback_query(call.id)
+@bot.callback_query_handler(func=lambda call: call.data == "gena_qr")
+def gena_qr_callback(call):
+    bot.answer_callback_query(call.id, "Generating Dynamic QR...")
+    send_auto_qr_screen(call.message.chat.id, message_id=call.message.message_id)
 
 @bot.callback_query_handler(func=lambda call: call.data == "check_balance")
 def bal_callback(call):
     credits = get_user_credits(call.message.chat.id)
     bot.answer_callback_query(call.id, f"Aapka balance: {credits} Searches", show_alert=True)
 
-@bot.callback_query_handler(func=lambda call: call.data == "upload_proof")
-def ask_proof(call):
-    waiting_screenshot.add(call.from_user.id)
-    bot.send_message(call.message.chat.id, "Kripya transaction screenshot yahan send karein 👇")
-    bot.answer_callback_query(call.id)
+# ----------------- AUTO-PAYMENT VERIFICATION ENGINE -----------------
+@bot.callback_query_handler(func=lambda call: call.data.startswith("checkpay_"))
+def auto_verify_payment(call):
+    bot.answer_callback_query(call.id, "Checking payment status with Paytm...")
+    order_id = call.data.split("_")[1]
+    user_id = call.message.chat.id
+
+    # Check if already processed
+    cursor.execute("SELECT order_id FROM processed_orders WHERE order_id = ?", (order_id,))
+    if cursor.fetchone():
+        bot.answer_callback_query(call.id, "⚠️ This payment is already credited!", show_alert=True)
+        return
+
+    try:
+        url = f"{VERIFY_API_URL}/?id={PAYTM_MID}&trn={order_id}"
+        response = requests.post(url, timeout=20)
+        data = response.json()
+
+        stat = data.get("STATUS", "")
+        resp = data.get("RESPMSG", "")
+        
+        try:
+            amount = float(data.get("TXNAMOUNT", 0) or 0)
+        except Exception:
+            amount = 0.0
+
+        if stat == "TXN_SUCCESS" and resp == "Txn Success" and amount >= 5:
+            points_gained = int(amount // 5)
+            new_bal = update_user_credits(user_id, points_gained)
+
+            # Record order to prevent reuse
+            cursor.execute("INSERT INTO processed_orders (order_id, user_id, amount, points, created_at) VALUES (?, ?, ?, ?, ?)", 
+                           (order_id, user_id, amount, points_gained, time.strftime('%Y-%m-%d %H:%M:%S')))
+            conn.commit()
+
+            success_caption = (
+                "🎉 *Deposit Completed Successfully!*\n\n"
+                f"💵 *Amount Paid:* {amount} INR\n"
+                f"⚡ *Credits Gained:* +{points_gained} Searches\n"
+                f"💰 *Total Wallet Balance:* `{new_bal}` Credits\n\n"
+                f"🆔 *Order ID:* `{order_id}`\n\n"
+                "👉 _Ab aap gaadi ka RC number bhej kar turant search kar sakte hain!_"
+            )
+            bot.edit_message_caption(
+                caption=success_caption,
+                chat_id=user_id,
+                message_id=call.message.message_id,
+                parse_mode="Markdown"
+            )
+
+            # Admin Notification
+            bot.send_message(
+                ADMIN_ID,
+                f"🔔 *New Auto-Payment Received!*\n\n"
+                f"👤 User: `{user_id}`\n"
+                f"💰 Amount: ₹{amount}\n"
+                f"⚡ Credits: +{points_gained}\n"
+                f"🆔 Order ID: `{order_id}`",
+                parse_mode="Markdown"
+            )
+        else:
+            bot.answer_callback_query(call.id, "❌ Payment not received yet!", show_alert=True)
+            failed_markup = types.InlineKeyboardMarkup(row_width=2)
+            failed_markup.add(
+                types.InlineKeyboardButton("🔄 Check Again", callback_data=f"checkpay_{order_id}"),
+                types.InlineKeyboardButton("🔁 New QR", callback_data="gena_qr")
+            )
+            try:
+                bot.edit_message_caption(
+                    caption=f"❌ *Payment Not Found Yet*\n\nAgar aapne pay kar diya hai toh 5-10 second baad 'Check Again' dabayein.\n\n🆔 Order ID: `{order_id}`",
+                    chat_id=user_id,
+                    message_id=call.message.message_id,
+                    parse_mode="Markdown",
+                    reply_markup=failed_markup
+                )
+            except Exception:
+                pass
+
+    except Exception as e:
+        bot.answer_callback_query(call.id, "⚠️ Error checking status. Try again.", show_alert=True)
 
 # ----------------- COUPON SYSTEM (CREATE & REDEEM) -----------------
 @bot.message_handler(commands=['create'])
@@ -237,16 +351,9 @@ def create_coupon(message):
         code = f"VC-{uuid.uuid4().hex[:6].upper()}"
         cursor.execute("INSERT INTO coupons (code, points, is_used) VALUES (?, ?, 0)", (code, points))
         conn.commit()
-        bot.reply_to(
-            message,
-            f"✅ *Coupon Created Successfully!*\n\n"
-            f"🎟️ *Code:* `{code}`\n"
-            f"💰 *Credits:* `{points}`\n\n"
-            f"User redemption format: `/redeem {code}`",
-            parse_mode="Markdown"
-        )
+        bot.reply_to(message, f"✅ *Coupon Created!*\n\n🎟️ Code: `{code}`\n💰 Points: {points}\n\nUse: `/redeem {code}`", parse_mode="Markdown")
     except Exception:
-        bot.reply_to(message, "⚠️ Usage: `/create <points>` (e.g., `/create 5`)", parse_mode="Markdown")
+        bot.reply_to(message, "Usage: `/create <points>`")
 
 @bot.message_handler(commands=['redeem'])
 def redeem_coupon(message):
@@ -259,81 +366,11 @@ def redeem_coupon(message):
             new_bal = update_user_credits(message.chat.id, points)
             cursor.execute("UPDATE coupons SET is_used = 1 WHERE code = ?", (code,))
             conn.commit()
-            bot.reply_to(
-                message,
-                f"🎉 *Redeemed Successfully!*\n\n+{points} Credits aapke account me add kar diye gaye hain.\n*Total Balance:* `{new_bal}` Credits.",
-                parse_mode="Markdown"
-            )
+            bot.reply_to(message, f"🎉 *Redeemed Successfully!*\n\n+{points} Credits added.\n*Total Balance:* `{new_bal}` Credits.", parse_mode="Markdown")
         else:
-            bot.reply_to(message, "❌ Invalid ya pehle se use kiya gaya Coupon code.")
+            bot.reply_to(message, "❌ Invalid ya used Coupon code.")
     except Exception:
-        bot.reply_to(message, "⚠️ Usage: `/redeem <coupon_code>`", parse_mode="Markdown")
-
-# ----------------- PAYMENT SCREENSHOT & APPROVAL -----------------
-@bot.message_handler(content_types=['photo'])
-def handle_proof_photo(message):
-    user_id = message.chat.id
-    if user_id in waiting_screenshot:
-        waiting_screenshot.remove(user_id)
-
-        admin_markup = types.InlineKeyboardMarkup(row_width=3)
-        btn_1 = types.InlineKeyboardButton("+1 (₹5)", callback_data=f"add_1_{user_id}")
-        btn_5 = types.InlineKeyboardButton("+5 (₹25)", callback_data=f"add_5_{user_id}")
-        btn_10 = types.InlineKeyboardButton("+10 (₹50)", callback_data=f"add_10_{user_id}")
-        btn_rej = types.InlineKeyboardButton("Reject ❌", callback_data=f"rej_pay_{user_id}")
-        admin_markup.row(btn_1, btn_5, btn_10)
-        admin_markup.add(btn_rej)
-
-        user_info = f"@{message.from_user.username}" if message.from_user.username else "No Username"
-        caption = f"🔔 *New Recharge Submission!*\nUser: {user_info}\nUser ID: `{user_id}`"
-
-        file_id = message.photo[-1].file_id
-        bot.send_photo(ADMIN_ID, file_id, caption=caption, parse_mode="Markdown", reply_markup=admin_markup)
-        bot.reply_to(message, "⏳ Screenshot received! Admin verification ke baad balance add ho jayega.")
-    else:
-        bot.reply_to(message, "Pehle /start karke Buy Credits select karein.")
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith(("add_", "rej_pay_")))
-def handle_admin_credit_approval(call):
-    if call.from_user.id != ADMIN_ID:
-        bot.answer_callback_query(call.id, "Permission Denied!", show_alert=True)
-        return
-
-    parts = call.data.split("_")
-    if parts[0] == "add":
-        credits_to_add = int(parts[1])
-        target_user = int(parts[2])
-        new_total = update_user_credits(target_user, credits_to_add)
-
-        try:
-            bot.send_message(
-                target_user,
-                f"🎉 *Payment Approved!*\n\n+{credits_to_add} Search Credits aapke wallet me add ho gaye hain.\n*Total Balance:* {new_total} Credits.",
-                parse_mode="Markdown"
-            )
-        except Exception:
-            pass
-
-        try:
-            bot.edit_message_caption(caption=call.message.caption + f"\n\nStatus: Approved (+{credits_to_add} Credits) ✅", chat_id=call.message.chat.id, message_id=call.message.message_id)
-        except Exception:
-            pass
-
-        bot.answer_callback_query(call.id, f"Added {credits_to_add} credits!")
-
-    elif parts[0] == "rej":
-        target_user = int(parts[2])
-        try:
-            bot.send_message(target_user, "❌ Aapka recharge payment reject kar diya gaya hai.")
-        except Exception:
-            pass
-
-        try:
-            bot.edit_message_caption(caption=call.message.caption + "\n\nStatus: Rejected ❌", chat_id=call.message.chat.id, message_id=call.message.message_id)
-        except Exception:
-            pass
-
-        bot.answer_callback_query(call.id, "Payment Rejected!")
+        bot.reply_to(message, "Usage: `/redeem <coupon_code>`")
 
 # ----------------- BROADCAST COMMAND -----------------
 @bot.message_handler(commands=['broadcast'])
@@ -342,12 +379,11 @@ def broadcast_command(message):
         return
     text = message.text.replace("/broadcast", "").strip()
     if not text:
-        bot.reply_to(message, "Usage: `/broadcast Aapka message`", parse_mode="Markdown")
+        bot.reply_to(message, "Usage: `/broadcast Aapka message`")
         return
 
     cursor.execute("SELECT user_id FROM users")
     users = cursor.fetchall()
-
     count = 0
     for (u_id,) in users:
         try:
@@ -372,7 +408,7 @@ def process_vehicle_search(message):
 
     if credits < 1:
         bot.reply_to(message, "❌ *Insufficient Balance!*\n\n1 Search karne ke liye ₹5 (1 Credit) zaroori hai.", parse_mode="Markdown")
-        send_payment_screen(user_id)
+        send_auto_qr_screen(user_id, amount=5)
         return
 
     load_msg = bot.reply_to(message, f"🔍 Searching details for `{rc}`... (-1 Credit)")
