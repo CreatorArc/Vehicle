@@ -23,7 +23,7 @@ def run_flask():
 threading.Thread(target=run_flask).start()
 
 # ----------------- CONFIGURATION -----------------
-BOT_TOKEN = "8834683428:AAGlWn91Xj4UjCu6pEVyuLoSWaU_SLjmS00"
+BOT_TOKEN = "8834683428:AAGQ7XPoOmF_0m1vNyTpGGixkJainGsvDlI"
 ADMIN_ID = 8800158361
 
 PAYTM_MID = "FdGQlV45296340803916"
