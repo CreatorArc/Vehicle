@@ -92,7 +92,7 @@ def get_main_menu(uid):
 def generate_paytm_qr(user_id, amount=5):
     try:
         url = f"{QR_API_URL}/?id={PAYTM_MID}&upi={PAYTM_UPI}&amount={amount}"
-        response = requests.post(url, timeout=10)
+        response = requests.post(url, timeout=7)
         if response.status_code == 200:
             data = response.json()
             if data.get('status') == 'success':
@@ -115,11 +115,11 @@ def send_auto_qr_screen(chat_id, message_id=None, amount=5):
     markup.add(btn_paid, btn_new)
 
     caption = (
-        f"💳 *Recharge Search Credits:*\n\n"
+        f"💳 <b>Recharge Search Credits:</b>\n\n"
         f"• 1 Search = ₹5\n"
-        f"• *Amount:* ₹{amount}\n\n"
-        "⚡ _Payment karne ke baad neeche '✅ Paid' dabayein._\n"
-        f"🆔 *Order ID:* `...{short_id}`"
+        f"• <b>Amount:</b> ₹{amount}\n\n"
+        "⚡ <i>Payment karne ke baad neeche '✅ Paid' dabayein.</i>\n"
+        f"🆔 <b>Order ID:</b> <code>...{short_id}</code>"
     )
 
     if message_id:
@@ -127,29 +127,30 @@ def send_auto_qr_screen(chat_id, message_id=None, amount=5):
             bot.edit_message_media(
                 chat_id=chat_id,
                 message_id=message_id,
-                media=types.InputMediaPhoto(media=qr_url, caption=caption, parse_mode="Markdown"),
+                media=types.InputMediaPhoto(media=qr_url, caption=caption, parse_mode="HTML"),
                 reply_markup=markup
             )
             return
         except Exception:
             pass
 
-    bot.send_photo(chat_id, qr_url, caption=caption, parse_mode="Markdown", reply_markup=markup)
+    bot.send_photo(chat_id, qr_url, caption=caption, parse_mode="HTML", reply_markup=markup)
 
-# ----------------- VEHICLE DATA FETCHER -----------------
-def safe_get(d, keys, default='N/A'):
-    for key in keys:
-        val = d.get(key)
-        if val not in [None, '', 'N/A', 'null']:
-            return str(val).strip()
-    return default
+# ----------------- VEHICLE DATA FETCHER (ROBUST) -----------------
+def safe_str(val, default='N/A'):
+    if val in [None, '', 'null', 'None', 'N/A']:
+        return default
+    return str(val).strip()
 
 def get_vehicle_data(rc):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
-        response = requests.get(VEHICLE_API + rc, headers=headers, timeout=10)
+        response = requests.get(VEHICLE_API + rc, headers=headers, timeout=6)
+        if response.status_code != 200:
+            return None
+            
         data = response.json()
-        if not data or data.get('error'):
+        if not data or not isinstance(data, dict) or data.get('error'):
             return None
 
         v = data.get('vehicle', {}) if isinstance(data.get('vehicle'), dict) else {}
@@ -157,26 +158,37 @@ def get_vehicle_data(rc):
         ins = data.get('insurance', {}) if isinstance(data.get('insurance'), dict) else {}
         addr = data.get('address', {}) if isinstance(data.get('address'), dict) else {}
 
-        chassis = safe_get(data, ['chassis_no', 'ChassisNumber', 'chassis'], safe_get(s, ['Chassis Number', 'chassis_no'], 'N/A'))
-        mobile = safe_get(data, ['mobile', 'mobile_no', 'phone', 'MobileNo'], 'Not Available')
+        owner = data.get('owner_name') or data.get('OwnerName') or data.get('owner') or v.get('Owner') or v.get('owner_name')
+        father = data.get('father_name') or data.get('FatherName') or data.get('father') or v.get('Father Name')
+        reg_no = data.get('reg_no') or data.get('RegistrationNumber') or data.get('rc_number') or v.get('Registration Number') or rc
+        reg_date = data.get('reg_date') or data.get('RegistrationDate') or data.get('registration_date') or v.get('Registration Date')
+        rto = data.get('rto') or data.get('RegistrationAuthority') or data.get('reg_authority') or v.get('Registration Authority')
+        model = data.get('maker_model') or data.get('model') or data.get('Model') or f"{s.get('Manufacturer', '')} {s.get('Model', '')}".strip()
+        fuel = data.get('fuel_type') or data.get('fuel') or data.get('FuelType') or s.get('Fuel Type')
+        engine = data.get('engine_no') or data.get('EngineNumber') or data.get('engine') or s.get('Engine Number')
+        chassis = data.get('chassis_no') or data.get('ChassisNumber') or data.get('chassis') or s.get('Chassis Number')
+        ins_comp = data.get('insurance_company') or data.get('InsuranceCompany') or data.get('insurance') or ins.get('Company')
+        ins_valid = data.get('insurance_valid_till') or data.get('InsuranceValidTill') or data.get('insurance_expiry') or ins.get('Valid Till')
+        present_addr = data.get('address') or data.get('PresentAddress') or data.get('present_address') or data.get('permanent_address') or addr.get('Present Address')
+        mobile = data.get('mobile') or data.get('mobile_no') or data.get('phone') or 'Not Available'
+        status = data.get('status') or data.get('Status') or data.get('rc_status') or v.get('Status') or 'ACTIVE'
 
-        reg = {
-            'reg_no': safe_get(data, ['reg_no', 'RegistrationNumber', 'rc_number'], safe_get(v, ['Registration Number'], rc)),
-            'owner': safe_get(data, ['owner_name', 'OwnerName', 'owner'], safe_get(v, ['Owner', 'owner_name'])),
-            'father': safe_get(data, ['father_name', 'FatherName', 'father'], safe_get(v, ['Father Name', 'father_name'])),
-            'mobile': mobile,
-            'status': safe_get(data, ['status', 'Status', 'rc_status'], safe_get(v, ['Status'], 'ACTIVE')),
-            'reg_authority': safe_get(data, ['rto', 'RegistrationAuthority', 'reg_authority'], safe_get(v, ['Registration Authority'])),
-            'reg_date': safe_get(data, ['reg_date', 'RegistrationDate', 'registration_date'], safe_get(v, ['Registration Date'])),
-            'model': safe_get(data, ['maker_model', 'model', 'Model', 'vehicle_model'], f"{safe_get(s, ['Manufacturer'], '')} {safe_get(s, ['Model'], '')}".strip()),
-            'fuel': safe_get(data, ['fuel_type', 'fuel', 'FuelType'], safe_get(s, ['Fuel Type', 'fuel_type'])),
-            'engine': safe_get(data, ['engine_no', 'EngineNumber', 'engine'], safe_get(s, ['Engine Number', 'engine_no'])),
-            'chassis': chassis,
-            'ins_company': safe_get(data, ['insurance_company', 'InsuranceCompany', 'insurance'], safe_get(ins, ['Company', 'insurance_company'])),
-            'ins_valid': safe_get(data, ['insurance_valid_till', 'InsuranceValidTill', 'insurance_expiry'], safe_get(ins, ['Valid Till', 'insurance_valid_till'])),
-            'present_addr': safe_get(data, ['address', 'PresentAddress', 'present_address', 'permanent_address'], safe_get(addr, ['Present Address', 'address']))
+        return {
+            'owner': safe_str(owner),
+            'father': safe_str(father),
+            'reg_no': safe_str(reg_no),
+            'reg_date': safe_str(reg_date),
+            'rto': safe_str(rto),
+            'model': safe_str(model),
+            'fuel': safe_str(fuel),
+            'engine': safe_str(engine),
+            'chassis': safe_str(chassis),
+            'ins_company': safe_str(ins_comp),
+            'ins_valid': safe_str(ins_valid),
+            'present_addr': safe_str(present_addr),
+            'mobile': safe_str(mobile),
+            'status': safe_str(status)
         }
-        return reg
     except Exception:
         return None
 
@@ -187,14 +199,14 @@ def start_msg(message):
     credits = get_user_credits(message.chat.id)
 
     welcome_text = (
-        f"👋 *Welcome {name}*\n\n"
-        "🚗 *Vehicle RC & Owner Number Finder Bot*\n\n"
-        f"• *Current Balance:* {credits} Credits\n"
-        "• *Charge:* 1 Search = 5₹ (1 Credit)\n\n"
-        "👉 *Redeem Coupon:* `/redeem <code>`\n\n"
-        "👇 _Gaadi ka RC number bhej kar search karein (e.g. DL01AB1234)_"
+        f"👋 <b>Welcome {name}</b>\n\n"
+        "🚗 <b>Vehicle RC & Owner Number Finder Bot</b>\n\n"
+        f"• <b>Current Balance:</b> {credits} Credits\n"
+        "• <b>Charge:</b> 1 Search = 5₹ (1 Credit)\n\n"
+        "👉 <b>Redeem Coupon:</b> <code>/redeem &lt;code&gt;</code>\n\n"
+        "👇 <i>Gaadi ka RC number bhej kar search karein (e.g. DL01AB1234)</i>"
     )
-    bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=get_main_menu(message.chat.id))
+    bot.send_message(message.chat.id, welcome_text, parse_mode="HTML", reply_markup=get_main_menu(message.chat.id))
 
 @bot.callback_query_handler(func=lambda call: call.data == "gena_qr")
 def gena_qr_callback(call):
@@ -215,7 +227,7 @@ def auto_verify_payment(call):
 
     try:
         url = f"{VERIFY_API_URL}/?id={PAYTM_MID}&trn={order_id}"
-        response = requests.post(url, timeout=10)
+        response = requests.post(url, timeout=7)
         data = response.json()
 
         stat = data.get("STATUS", "")
@@ -234,46 +246,27 @@ def auto_verify_payment(call):
             conn.commit()
 
             success_caption = (
-                "🎉 *Deposit Completed Successfully!*\n\n"
-                f"💵 *Amount Paid:* {amount} INR\n"
-                f"⚡ *Credits Gained:* +{points_gained} Searches\n"
-                f"💰 *Total Wallet Balance:* `{new_bal}` Credits\n\n"
-                f"🆔 *Order ID:* `{order_id}`\n\n"
-                "👉 _Ab aap gaadi ka RC number bhej kar turant search kar sakte hain!_"
+                "🎉 <b>Deposit Completed Successfully!</b>\n\n"
+                f"💵 <b>Amount Paid:</b> {amount} INR\n"
+                f"⚡ <b>Credits Gained:</b> +{points_gained} Searches\n"
+                f"💰 <b>Total Wallet Balance:</b> <code>{new_bal}</code> Credits\n\n"
+                f"🆔 <b>Order ID:</b> <code>{order_id}</code>\n\n"
+                "👉 <i>Ab aap gaadi ka RC number bhej kar turant search kar sakte hain!</i>"
             )
             bot.edit_message_caption(
                 caption=success_caption,
                 chat_id=user_id,
                 message_id=call.message.message_id,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
 
             bot.send_message(
                 ADMIN_ID,
-                f"🔔 *New Auto-Payment Received!*\n\n"
-                f"👤 User: `{user_id}`\n"
-                f"💰 Amount: ₹{amount}\n"
-                f"⚡ Credits: +{points_gained}\n"
-                f"🆔 Order ID: `{order_id}`",
-                parse_mode="Markdown"
+                f"🔔 <b>New Auto-Payment Received!</b>\n\n👤 User: <code>{user_id}</code>\n💰 Amount: ₹{amount}\n⚡ Credits: +{points_gained}\n🆔 Order ID: <code>{order_id}</code>",
+                parse_mode="HTML"
             )
         else:
             bot.answer_callback_query(call.id, "❌ Payment nahi mili abhi tak!", show_alert=True)
-            failed_markup = types.InlineKeyboardMarkup(row_width=2)
-            failed_markup.add(
-                types.InlineKeyboardButton("🔄 Check Again", callback_data=f"checkpay_{order_id}"),
-                types.InlineKeyboardButton("🔁 New QR", callback_data="gena_qr")
-            )
-            try:
-                bot.edit_message_caption(
-                    caption=f"❌ *Payment Not Found Yet*\n\nAgar aapne pay kar diya hai toh 5-10 second baad 'Check Again' dabayein.\n\n🆔 Order ID: `{order_id}`",
-                    chat_id=user_id,
-                    message_id=call.message.message_id,
-                    parse_mode="Markdown",
-                    reply_markup=failed_markup
-                )
-            except Exception:
-                pass
     except Exception:
         bot.answer_callback_query(call.id, "⚠️ Verification error. Dobara try karein.", show_alert=True)
 
@@ -286,9 +279,9 @@ def create_coupon(message):
         code = f"VC-{uuid.uuid4().hex[:6].upper()}"
         cursor.execute("INSERT INTO coupons (code, points, is_used) VALUES (?, ?, 0)", (code, points))
         conn.commit()
-        bot.reply_to(message, f"✅ *Coupon Created Successfully!*\n\n🎟️ Code: `{code}`\n💰 Points: {points}\n\nUse: `/redeem {code}`", parse_mode="Markdown")
+        bot.reply_to(message, f"✅ <b>Coupon Created Successfully!</b>\n\n🎟️ Code: <code>{code}</code>\n💰 Points: {points}\n\nUse: <code>/redeem {code}</code>", parse_mode="HTML")
     except Exception:
-        bot.reply_to(message, "Usage: `/create <points>`")
+        bot.reply_to(message, "Usage: <code>/create &lt;points&gt;</code>", parse_mode="HTML")
 
 @bot.message_handler(commands=['addcredits'])
 def admin_add_direct(message):
@@ -298,9 +291,9 @@ def admin_add_direct(message):
         target_uid = int(parts[1])
         pts = int(parts[2])
         new_bal = update_user_credits(target_uid, pts)
-        bot.reply_to(message, f"✅ User `{target_uid}` ko {pts} credits diye. Total: `{new_bal}`")
+        bot.reply_to(message, f"✅ User <code>{target_uid}</code> ko {pts} credits diye. Total: <code>{new_bal}</code>", parse_mode="HTML")
     except Exception:
-        bot.reply_to(message, "Usage: `/addcredits <user_id> <amount>`")
+        bot.reply_to(message, "Usage: <code>/addcredits &lt;user_id&gt; &lt;amount&gt;</code>", parse_mode="HTML")
 
 @bot.message_handler(commands=['redeem'])
 def redeem_coupon(message):
@@ -313,18 +306,18 @@ def redeem_coupon(message):
             new_bal = update_user_credits(message.chat.id, points)
             cursor.execute("UPDATE coupons SET is_used = 1 WHERE code = ?", (code,))
             conn.commit()
-            bot.reply_to(message, f"🎉 *Redeemed Successfully!*\n\n+{points} Credits added.\n*Total Balance:* `{new_bal}` Credits.", parse_mode="Markdown", reply_markup=get_main_menu(message.chat.id))
+            bot.reply_to(message, f"🎉 <b>Redeemed Successfully!</b>\n\n+{points} Credits added.\n<b>Total Balance:</b> <code>{new_bal}</code> Credits.", parse_mode="HTML", reply_markup=get_main_menu(message.chat.id))
         else:
             bot.reply_to(message, "❌ Invalid ya used Coupon code.")
     except Exception:
-        bot.reply_to(message, "Usage: `/redeem <coupon_code>`")
+        bot.reply_to(message, "Usage: <code>/redeem &lt;coupon_code&gt;</code>", parse_mode="HTML")
 
 @bot.message_handler(commands=['broadcast'])
 def broadcast_command(message):
     if message.from_user.id != ADMIN_ID: return
     text = message.text.replace("/broadcast", "").strip()
     if not text:
-        bot.reply_to(message, "Usage: `/broadcast Aapka message`")
+        bot.reply_to(message, "Usage: <code>/broadcast Aapka message</code>", parse_mode="HTML")
         return
 
     cursor.execute("SELECT user_id FROM users")
@@ -357,50 +350,53 @@ def process_vehicle_search(message):
 
     rc = re.sub(r'[^A-Z0-9]', '', text.upper())
     if len(rc) < 6 or len(rc) > 12:
-        bot.reply_to(message, "⚠️ Sahi RC format bhejein (e.g. `DL01AB1234`).", parse_mode="Markdown")
+        bot.reply_to(message, "⚠️ Sahi RC format bhejein (e.g. <code>DL01AB1234</code>).", parse_mode="HTML")
         return
 
     if credits < 1:
-        bot.reply_to(message, "❌ *Insufficient Balance!*\n\n1 Search karne ke liye ₹5 (1 Credit) zaroori hai.", parse_mode="Markdown")
+        bot.reply_to(message, "❌ <b>Insufficient Balance!</b>\n\n1 Search karne ke liye ₹5 (1 Credit) zaroori hai.", parse_mode="HTML")
         send_auto_qr_screen(user_id, amount=5)
         return
 
-    load_msg = bot.reply_to(message, f"🔍 Searching details for `{rc}`... (-1 Credit)")
-    reg = get_vehicle_data(rc)
+    load_msg = bot.reply_to(message, f"🔍 Searching details for <code>{rc}</code>... (-1 Credit)", parse_mode="HTML")
+    
+    try:
+        reg = get_vehicle_data(rc)
+        if not reg:
+            bot.edit_message_text(f"❌ RC <code>{rc}</code> records nahi mile. Balance deduct nahi hua.", chat_id=user_id, message_id=load_msg.message_id, parse_mode="HTML")
+            return
 
-    if not reg:
-        bot.edit_message_text(f"❌ RC `{rc}` records nahi mile. Balance deduct nahi hua.", chat_id=user_id, message_id=load_msg.message_id)
-        return
+        remaining = update_user_credits(user_id, -1)
 
-    remaining = update_user_credits(user_id, -1)
+        res = (
+            "🚗 <b>VEHICLE RC DETAILS</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "👤 <b>OWNER DETAILS</b>\n"
+            f"• <b>Owner Name:</b> {reg['owner']}\n"
+            f"• <b>Father Name:</b> {reg['father']}\n"
+            f"• 📱 <b>Mobile No:</b> <code>{reg['mobile']}</code>\n"
+            f"• <b>Status:</b> {reg['status']}\n\n"
+            "📋 <b>REGISTRATION</b>\n"
+            f"• <b>RC Number:</b> {reg['reg_no']}\n"
+            f"• <b>Reg Date:</b> {reg['reg_date']}\n"
+            f"• <b>RTO Authority:</b> {reg['rto']}\n\n"
+            "🚘 <b>SPECIFICATIONS</b>\n"
+            f"• <b>Model:</b> {reg['model']}\n"
+            f"• <b>Fuel:</b> {reg['fuel']}\n"
+            f"• <b>Engine No:</b> <code>{reg['engine']}</code>\n"
+            f"• <b>Chassis No:</b> <code>{reg['chassis']}</code>\n\n"
+            "🛡️ <b>INSURANCE</b>\n"
+            f"• <b>Company:</b> {reg['ins_company']}\n"
+            f"• <b>Valid Till:</b> {reg['ins_valid']}\n\n"
+            "🏠 <b>ADDRESS</b>\n"
+            f"• <b>Present:</b> {reg['present_addr']}\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"💰 <b>Remaining Balance:</b> {remaining} Credits"
+        )
 
-    res = (
-        "🚗 *VEHICLE RC DETAILS*\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "👤 *OWNER DETAILS*\n"
-        f"• *Owner Name:* {reg['owner']}\n"
-        f"• *Father Name:* {reg['father']}\n"
-        f"• 📱 *Mobile No:* `{reg['mobile']}`\n"
-        f"• *Status:* {reg['status']}\n\n"
-        "📋 *REGISTRATION*\n"
-        f"• *RC Number:* {reg['reg_no']}\n"
-        f"• *Reg Date:* {reg['reg_date']}\n"
-        f"• *RTO Authority:* {reg['reg_authority']}\n\n"
-        "🚘 *SPECIFICATIONS*\n"
-        f"• *Model:* {reg['model']}\n"
-        f"• *Fuel:* {reg['fuel']}\n"
-        f"• *Engine No:* `{reg['engine']}`\n"
-        f"• *Chassis No:* `{reg['chassis']}`\n\n"
-        "🛡️ *INSURANCE*\n"
-        f"• *Company:* {reg['ins_company']}\n"
-        f"• *Valid Till:* {reg['ins_valid']}\n\n"
-        "🏠 *ADDRESS*\n"
-        f"• *Present:* {reg['present_addr']}\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💰 *Remaining Balance:* {remaining} Credits"
-    )
-
-    bot.edit_message_text(res, chat_id=user_id, message_id=load_msg.message_id, parse_mode="Markdown", reply_markup=get_main_menu(user_id))
+        bot.edit_message_text(res, chat_id=user_id, message_id=load_msg.message_id, parse_mode="HTML", reply_markup=get_main_menu(user_id))
+    except Exception as e:
+        bot.edit_message_text(f"❌ Error aayi details process karne me.", chat_id=user_id, message_id=load_msg.message_id)
 
 if __name__ == '__main__':
     bot.infinity_polling()
