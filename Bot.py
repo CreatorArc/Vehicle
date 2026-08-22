@@ -4,6 +4,7 @@ import time
 import sqlite3
 import threading
 import uuid
+import html
 import requests
 from flask import Flask
 import telebot
@@ -23,7 +24,7 @@ def run_flask():
 threading.Thread(target=run_flask).start()
 
 # ----------------- CONFIGURATION -----------------
-BOT_TOKEN = "8834683428:AAGQ7XPoOmF_0m1vNyTpGGixkJainGsvDlI"
+BOT_TOKEN = "8834683428:AAGlWn91Xj4UjCu6pEVyuLoSWaU_SLjmS00"
 ADMIN_ID = 8800158361
 
 PAYTM_MID = "FdGQlV45296340803916"
@@ -33,7 +34,7 @@ QR_API_URL = "https://paytms.aimbotaxe4.workers.dev"
 VERIFY_API_URL = "https://paytmv.aimbotaxe4.workers.dev"
 VEHICLE_API = "https://vehicle-chass.vercel.app/api/vehicle?rc="
 
-bot = telebot.TeleBot(BOT_TOKEN)
+bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
 bot.remove_webhook()
 
 # ----------------- DATABASE SETUP -----------------
@@ -82,23 +83,29 @@ def update_user_credits(user_id, delta):
     conn.commit()
     return new_bal
 
+def get_main_menu(uid):
+    credits = get_user_credits(uid)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("💳 Buy Credits (QR)", f"💰 Balance: {credits} Searches")
+    return markup
+
 # ----------------- AUTO QR GENERATION -----------------
 def generate_paytm_qr(user_id, amount=5):
     try:
         url = f"{QR_API_URL}/?id={PAYTM_MID}&upi={PAYTM_UPI}&amount={amount}"
-        response = requests.post(url, timeout=15)
+        response = requests.post(url, timeout=10)
         if response.status_code == 200:
             data = response.json()
             if data.get('status') == 'success':
                 return data.get('qrImageUrl'), data.get('trackId')
-    except Exception as e:
-        print(f"QR Gen Error: {e}")
+    except Exception:
+        pass
     return None, None
 
 def send_auto_qr_screen(chat_id, message_id=None, amount=5):
     qr_url, order_id = generate_paytm_qr(chat_id, amount)
     if not qr_url:
-        bot.send_message(chat_id, "❌ QR generate karne me samasya aayi. Kripya thodi der baad prayas karein.")
+        bot.send_message(chat_id, "❌ QR generate karne me problem aayi. Kripya dobara try karein.")
         return
 
     short_id = order_id[-6:] if len(order_id) >= 6 else order_id
@@ -109,11 +116,11 @@ def send_auto_qr_screen(chat_id, message_id=None, amount=5):
     markup.add(btn_paid, btn_new)
 
     caption = (
-        f"💳 *Scan & Pay {amount}₹ on this QR Code*\n\n"
-        "⚡ _Payment karne ke baad neeche '✅ Paid' button dabayein._\n"
-        "Credits aapke wallet me automatically add ho jayenge!\n\n"
-        f"🆔 *Order ID:* `...{short_id}`\n"
-        f"💰 *Rate:* 5₹ = 1 Search Credit"
+        f"💳 <b>Recharge Search Credits:</b>\n\n"
+        f"• 1 Search = ₹5\n"
+        f"• <b>Amount:</b> ₹{amount}\n\n"
+        "⚡ <i>Payment karne ke baad neeche '✅ Paid' dabayein.</i>\n"
+        f"🆔 <b>Order ID:</b> <code>...{short_id}</code>"
     )
 
     if message_id:
@@ -121,272 +128,100 @@ def send_auto_qr_screen(chat_id, message_id=None, amount=5):
             bot.edit_message_media(
                 chat_id=chat_id,
                 message_id=message_id,
-                media=types.InputMediaPhoto(media=qr_url, caption=caption, parse_mode="Markdown"),
+                media=types.InputMediaPhoto(media=qr_url, caption=caption, parse_mode="HTML"),
                 reply_markup=markup
             )
             return
         except Exception:
             pass
 
-    bot.send_photo(chat_id, qr_url, caption=caption, parse_mode="Markdown", reply_markup=markup)
+    bot.send_photo(chat_id, qr_url, caption=caption, parse_mode="HTML", reply_markup=markup)
 
-# ----------------- VEHICLE & MOBILE SCRAPER -----------------
-def safe_get(d, key, default='N/A'):
-    val = d.get(key, '')
-    return default if (val == '' or val is None) else str(val)
+# ----------------- VEHICLE DATA FETCHER -----------------
+def safe_clean(val, default='N/A'):
+    if val in [None, '', 'null', 'None', 'N/A']:
+        return default
+    return html.escape(str(val).strip())
 
 def get_vehicle_data(rc):
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
-        response = requests.get(VEHICLE_API + rc, timeout=25)
+        response = requests.get(VEHICLE_API + rc, headers=headers, timeout=12)
+        if response.status_code != 200:
+            return None
+            
         data = response.json()
         if not data.get('success', False):
-            return None, None
+            return None
 
         v = data.get('vehicle', {})
         s = data.get('specifications', {})
         ins = data.get('insurance', {})
         addr = data.get('address', {})
-        pol = data.get('pollution', {})
 
-        chassis = s.get('Chassis Number', '')
+        chassis = s.get('Chassis Number') or ''
         if not chassis:
-            return None, None
+            return None
 
-        reg = {
-            'reg_no': v.get('Registration Number', ''),
-            'owner': v.get('Owner', ''),
-            'father': v.get('Father Name', ''),
-            'owner_type': v.get('Owner Type', ''),
-            'status': v.get('Status', ''),
-            'reg_authority': v.get('Registration Authority', ''),
-            'reg_date': v.get('Registration Date', ''),
-            'rc_expiry': v.get('RC Expiry', ''),
-            'manufacturer': s.get('Manufacturer', ''),
-            'model': s.get('Model', ''),
-            'vehicle_class': s.get('Vehicle Class', ''),
-            'fuel': s.get('Fuel Type', ''),
-            'engine': s.get('Engine Number', ''),
-            'chassis': chassis,
-            'ins_company': ins.get('Company', ''),
-            'ins_policy': ins.get('Policy Number', ''),
-            'ins_valid': ins.get('Valid Till', ''),
-            'pucc_valid': pol.get('PUCC Valid Till', ''),
-            'present_addr': addr.get('Present Address', ''),
-            'perm_addr': addr.get('Permanent Address', '')
+        return {
+            'owner': safe_clean(v.get('Owner')),
+            'father': safe_clean(v.get('Father Name')),
+            'reg_no': safe_clean(v.get('Registration Number', rc)),
+            'reg_date': safe_clean(v.get('Registration Date')),
+            'rto': safe_clean(v.get('Registration Authority')),
+            'model': safe_clean(f"{s.get('Manufacturer', '')} {s.get('Model', '')}".strip()),
+            'fuel': safe_clean(s.get('Fuel Type')),
+            'engine': safe_clean(s.get('Engine Number')),
+            'chassis': safe_clean(chassis),
+            'ins_company': safe_clean(ins.get('Company')),
+            'ins_valid': safe_clean(ins.get('Valid Till')),
+            'present_addr': safe_clean(addr.get('Present Address')),
+            'mobile': 'Not Available',
+            'status': safe_clean(v.get('Status', 'ACTIVE'))
         }
-        return chassis[-5:], reg
     except Exception:
-        return None, None
-
-def get_mobile(rc, last5):
-    session = requests.Session()
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'en-IN,en-GB;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1'
-    }
-    session.headers.update(headers)
-
-    HP = 'https://vahan.parivahan.gov.in/vahanservice/vahan/ui/statevalidation/homepage.xhtml?statecd=Mzc2MzM2MzAzNjY0MzIzODM3NjIzNjY0MzY2MjM3NDQ0Yw=='
-    HB = 'https://vahan.parivahan.gov.in/vahanservice/vahan/ui/statevalidation/homepage.xhtml'
-    LI = 'https://vahan.parivahan.gov.in/vahanservice/vahan/ui/usermgmt/login.xhtml'
-    FR = 'https://vahan.parivahan.gov.in/vahanservice/vahan/ui/balanceservice/form_reschedule_fitness.xhtml'
-
-    for attempt in range(3):
-        try:
-            r = session.get(HP, timeout=25)
-            vs = re.search(r'<input[^>]*name="javax\.faces\.ViewState"[^>]*value="([^"]+)"', r.text)
-            if not vs:
-                time.sleep(1)
-                continue
-            vs = vs.group(1)
-
-            cid = 'j_idt193'
-            cm = re.search(r'<div[^>]*id="(j_idt\d+)"[^>]*class="[^"]*ui-chkbox', r.text)
-            if cm:
-                cid = cm.group(1)
-
-            AH = {
-                'Accept': 'application/xml, text/xml, */*; q=0.01',
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                'Faces-Request': 'partial/ajax',
-                'X-Requested-With': 'XMLHttpRequest',
-                'Origin': 'https://vahan.parivahan.gov.in',
-                'Referer': HP
-            }
-
-            r = session.post(HB, headers=AH, data={
-                'javax.faces.partial.ajax': 'true',
-                'javax.faces.source': 'fit_c_office_to',
-                'javax.faces.partial.execute': 'fit_c_office_to',
-                'javax.faces.behavior.event': 'change',
-                'homepageformid': 'homepageformid',
-                'fit_c_office_to_input': '1',
-                'javax.faces.ViewState': vs
-            }, timeout=20)
-            m = re.search(r'<update id="j_id1:javax\.faces\.ViewState:0"><!\[CDATA\[(.*?)\]\]></update>', r.text)
-            if m: vs = m.group(1)
-
-            r = session.post(HB, headers=AH, data={
-                'javax.faces.partial.ajax': 'true',
-                'javax.faces.source': cid,
-                'javax.faces.partial.execute': cid,
-                'javax.faces.partial.render': 'proccedHomeButtonId',
-                'javax.faces.behavior.event': 'change',
-                'homepageformid': 'homepageformid',
-                f'{cid}_input': 'on',
-                'javax.faces.ViewState': vs
-            }, timeout=20)
-            m = re.search(r'<update id="j_id1:javax\.faces\.ViewState:0"><!\[CDATA\[(.*?)\]\]></update>', r.text)
-            if m: vs = m.group(1)
-
-            r = session.post(HB, headers=AH, data={
-                'javax.faces.partial.ajax': 'true',
-                'javax.faces.source': 'proccedHomeButtonId',
-                'javax.faces.partial.execute': '@all',
-                'proccedHomeButtonId': 'proccedHomeButtonId',
-                'homepageformid': 'homepageformid',
-                f'{cid}_input': 'on',
-                'javax.faces.ViewState': vs
-            }, timeout=20)
-            m = re.search(r'<update id="j_id1:javax\.faces\.ViewState:0"><!\[CDATA\[(.*?)\]\]></update>', r.text)
-            if m: vs = m.group(1)
-
-            dlg = 'j_idt536'
-            dm = re.search(r'id="(j_idt\d+)"[^>]*class="[^"]*ui-button', r.text)
-            if dm: dlg = dm.group(1)
-
-            r = session.post(HB, headers=AH, data={
-                'javax.faces.partial.ajax': 'true',
-                'javax.faces.source': dlg,
-                'javax.faces.partial.execute': '@all',
-                dlg: dlg,
-                'homepageformid': 'homepageformid',
-                f'{cid}_input': 'on',
-                'javax.faces.ViewState': vs
-            }, timeout=20)
-            m = re.search(r'<update id="j_id1:javax\.faces\.ViewState:0"><!\[CDATA\[(.*?)\]\]></update>', r.text)
-            if m: vs = m.group(1)
-
-            r = session.get(LI + '?faces-redirect=true', headers={**headers, 'Referer': HP}, timeout=20)
-            vs = re.search(r'<input[^>]*name="javax\.faces\.ViewState"[^>]*value="([^"]+)"', r.text)
-            if not vs:
-                time.sleep(1)
-                continue
-            vs = vs.group(1)
-
-            fit = 'j_idt506'
-            fm = re.search(r'id="(j_idt\d+)"[^>]*type="submit"', r.text)
-            if fit and fm: fit = fm.group(1)
-
-            session.post(LI, headers={
-                **headers,
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Origin': 'https://vahan.parivahan.gov.in',
-                'Referer': LI + '?faces-redirect=true'
-            }, data={
-                'loginForm': 'loginForm',
-                fit: fit,
-                'javax.faces.ViewState': vs,
-                'fitbalcTest': 'fitbalcTest',
-                'pur_cd': '86'
-            }, timeout=20)
-
-            r = session.get(FR, headers={**headers, 'Referer': LI + '?faces-redirect=true'}, timeout=20)
-            vs = re.search(r'<input[^>]*name="javax\.faces\.ViewState"[^>]*value="([^"]+)"', r.text)
-            if not vs:
-                time.sleep(1)
-                continue
-            vs = vs.group(1)
-
-            r = session.post(FR, headers={**AH, 'Referer': FR}, data={
-                'javax.faces.partial.ajax': 'true',
-                'javax.faces.source': 'balanceFeesFine:validate_dtls',
-                'javax.faces.partial.execute': '@all',
-                'javax.faces.partial.render': 'balanceFeesFine:auth_panel',
-                'balanceFeesFine:validate_dtls': 'balanceFeesFine:validate_dtls',
-                'balanceFeesFine': 'balanceFeesFine',
-                'balanceFeesFine:tf_reg_no': rc,
-                'balanceFeesFine:tf_chasis_no': last5,
-                'javax.faces.ViewState': vs
-            }, timeout=20)
-
-            patterns = [
-                r'id="balanceFeesFine:tf_mobile"[^>]*value="(\d{10})"',
-                r'value="(\d{10})"[^>]*id="balanceFeesFine:tf_mobile"',
-                r'tf_mobile[^>]*value="(\d{10})"'
-            ]
-            for p in patterns:
-                mo = re.search(p, r.text)
-                if mo and mo.group(1)[0] in '6789':
-                    return {'success': True, 'mobile': mo.group(1), 'chassis_last5': last5}
-
-            nums = re.findall(r'\b[6-9]\d{9}\b', r.text)
-            if nums:
-                return {'success': True, 'mobile': nums[0], 'chassis_last5': last5}
-
-        except Exception as err:
-            print(f"Fetch Error (Attempt {attempt+1}): {err}")
-        
-        time.sleep(2)
-
-    return {'success': False, 'mobile': 'Not Available', 'chassis_last5': last5}
+        return None
 
 # ----------------- BOT COMMANDS & UI -----------------
 @bot.message_handler(commands=['start'])
 def start_msg(message):
+    name = html.escape(message.from_user.first_name or "User")
     credits = get_user_credits(message.chat.id)
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    btn_recharge = types.InlineKeyboardButton("💳 Auto Recharge (QR)", callback_data="gena_qr")
-    btn_bal = types.InlineKeyboardButton(f"💰 Balance: {credits} Searches", callback_data="check_balance")
-    markup.add(btn_recharge, btn_bal)
 
     welcome_text = (
-        f"👋 *Welcome {message.from_user.first_name}*\n\n"
-        "🚗 *Vehicle RC & Owner Number Finder Bot*\n\n"
-        f"• *Current Balance:* `{credits}` Credits\n"
-        "• *Charge:* 1 Search = 5₹ (1 Credit)\n\n"
-        "👉 *Redeem Coupon:* `/redeem <code>`\n\n"
-        "👇 _Gaadi ka RC number bhej kar search karein (e.g. DL01AB1234)_"
+        f"👋 <b>Welcome {name}</b>\n\n"
+        "🚗 <b>Vehicle RC & Owner Number Finder Bot</b>\n\n"
+        f"• <b>Current Balance:</b> {credits} Credits\n"
+        "• <b>Charge:</b> 1 Search = 5₹ (1 Credit)\n\n"
+        "👉 <b>Redeem Coupon:</b> <code>/redeem &lt;code&gt;</code>\n\n"
+        "👇 <i>Gaadi ka RC number bhej kar search karein (e.g. DL01AB1234)</i>"
     )
-    bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
+    bot.send_message(message.chat.id, welcome_text, parse_mode="HTML", reply_markup=get_main_menu(message.chat.id))
 
 @bot.callback_query_handler(func=lambda call: call.data == "gena_qr")
 def gena_qr_callback(call):
     bot.answer_callback_query(call.id, "Generating Dynamic QR...")
     send_auto_qr_screen(call.message.chat.id, message_id=call.message.message_id)
 
-@bot.callback_query_handler(func=lambda call: call.data == "check_balance")
-def bal_callback(call):
-    credits = get_user_credits(call.message.chat.id)
-    bot.answer_callback_query(call.id, f"Aapka balance: {credits} Searches", show_alert=True)
-
-# ----------------- AUTO-PAYMENT VERIFICATION ENGINE -----------------
+# ----------------- PAYMENT VERIFICATION ENGINE -----------------
 @bot.callback_query_handler(func=lambda call: call.data.startswith("checkpay_"))
 def auto_verify_payment(call):
-    bot.answer_callback_query(call.id, "Checking payment status with Paytm...")
+    bot.answer_callback_query(call.id, "Checking payment status...")
     order_id = call.data.split("_")[1]
     user_id = call.message.chat.id
 
     cursor.execute("SELECT order_id FROM processed_orders WHERE order_id = ?", (order_id,))
     if cursor.fetchone():
-        bot.answer_callback_query(call.id, "⚠️ This payment is already credited!", show_alert=True)
+        bot.answer_callback_query(call.id, "⚠️ Yeh payment pehle hi credit ho chuki hai!", show_alert=True)
         return
 
     try:
         url = f"{VERIFY_API_URL}/?id={PAYTM_MID}&trn={order_id}"
-        response = requests.post(url, timeout=20)
+        response = requests.post(url, timeout=10)
         data = response.json()
 
         stat = data.get("STATUS", "")
         resp = data.get("RESPMSG", "")
-        
         try:
             amount = float(data.get("TXNAMOUNT", 0) or 0)
         except Exception:
@@ -401,63 +236,54 @@ def auto_verify_payment(call):
             conn.commit()
 
             success_caption = (
-                "🎉 *Deposit Completed Successfully!*\n\n"
-                f"💵 *Amount Paid:* {amount} INR\n"
-                f"⚡ *Credits Gained:* +{points_gained} Searches\n"
-                f"💰 *Total Wallet Balance:* `{new_bal}` Credits\n\n"
-                f"🆔 *Order ID:* `{order_id}`\n\n"
-                "👉 _Ab aap gaadi ka RC number bhej kar turant search kar sakte hain!_"
+                "🎉 <b>Deposit Completed Successfully!</b>\n\n"
+                f"💵 <b>Amount Paid:</b> {amount} INR\n"
+                f"⚡ <b>Credits Gained:</b> +{points_gained} Searches\n"
+                f"💰 <b>Total Wallet Balance:</b> <code>{new_bal}</code> Credits\n\n"
+                f"🆔 <b>Order ID:</b> <code>{order_id}</code>\n\n"
+                "👉 <i>Ab aap gaadi ka RC number bhej kar turant search kar sakte hain!</i>"
             )
             bot.edit_message_caption(
                 caption=success_caption,
                 chat_id=user_id,
                 message_id=call.message.message_id,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
 
             bot.send_message(
                 ADMIN_ID,
-                f"🔔 *New Auto-Payment Received!*\n\n"
-                f"👤 User: `{user_id}`\n"
-                f"💰 Amount: ₹{amount}\n"
-                f"⚡ Credits: +{points_gained}\n"
-                f"🆔 Order ID: `{order_id}`",
-                parse_mode="Markdown"
+                f"🔔 <b>New Auto-Payment Received!</b>\n\n👤 User: <code>{user_id}</code>\n💰 Amount: ₹{amount}\n⚡ Credits: +{points_gained}\n🆔 Order ID: <code>{order_id}</code>",
+                parse_mode="HTML"
             )
         else:
-            bot.answer_callback_query(call.id, "❌ Payment not received yet!", show_alert=True)
-            failed_markup = types.InlineKeyboardMarkup(row_width=2)
-            failed_markup.add(
-                types.InlineKeyboardButton("🔄 Check Again", callback_data=f"checkpay_{order_id}"),
-                types.InlineKeyboardButton("🔁 New QR", callback_data="gena_qr")
-            )
-            try:
-                bot.edit_message_caption(
-                    caption=f"❌ *Payment Not Found Yet*\n\nAgar aapne pay kar diya hai toh 5-10 second baad 'Check Again' dabayein.\n\n🆔 Order ID: `{order_id}`",
-                    chat_id=user_id,
-                    message_id=call.message.message_id,
-                    parse_mode="Markdown",
-                    reply_markup=failed_markup
-                )
-            except Exception:
-                pass
+            bot.answer_callback_query(call.id, "❌ Payment nahi mili abhi tak!", show_alert=True)
+    except Exception:
+        bot.answer_callback_query(call.id, "⚠️ Verification error. Dobara try karein.", show_alert=True)
 
-    except Exception as e:
-        bot.answer_callback_query(call.id, "⚠️ Error checking status. Try again.", show_alert=True)
-
-# ----------------- COUPON SYSTEM (CREATE & REDEEM) -----------------
+# ----------------- ADMIN COMMANDS -----------------
 @bot.message_handler(commands=['create'])
 def create_coupon(message):
-    if message.from_user.id != ADMIN_ID:
-        return
+    if message.from_user.id != ADMIN_ID: return
     try:
         points = int(message.text.split()[1])
         code = f"VC-{uuid.uuid4().hex[:6].upper()}"
         cursor.execute("INSERT INTO coupons (code, points, is_used) VALUES (?, ?, 0)", (code, points))
         conn.commit()
-        bot.reply_to(message, f"✅ *Coupon Created!*\n\n🎟️ Code: `{code}`\n💰 Points: {points}\n\nUse: `/redeem {code}`", parse_mode="Markdown")
+        bot.reply_to(message, f"✅ <b>Coupon Created Successfully!</b>\n\n🎟️ Code: <code>{code}</code>\n💰 Points: {points}\n\nUse: <code>/redeem {code}</code>", parse_mode="HTML")
     except Exception:
-        bot.reply_to(message, "Usage: `/create <points>`")
+        bot.reply_to(message, "Usage: <code>/create &lt;points&gt;</code>", parse_mode="HTML")
+
+@bot.message_handler(commands=['addcredits'])
+def admin_add_direct(message):
+    if message.from_user.id != ADMIN_ID: return
+    try:
+        parts = message.text.split()
+        target_uid = int(parts[1])
+        pts = int(parts[2])
+        new_bal = update_user_credits(target_uid, pts)
+        bot.reply_to(message, f"✅ User <code>{target_uid}</code> ko {pts} credits diye. Total: <code>{new_bal}</code>", parse_mode="HTML")
+    except Exception:
+        bot.reply_to(message, "Usage: <code>/addcredits &lt;user_id&gt; &lt;amount&gt;</code>", parse_mode="HTML")
 
 @bot.message_handler(commands=['redeem'])
 def redeem_coupon(message):
@@ -470,20 +296,18 @@ def redeem_coupon(message):
             new_bal = update_user_credits(message.chat.id, points)
             cursor.execute("UPDATE coupons SET is_used = 1 WHERE code = ?", (code,))
             conn.commit()
-            bot.reply_to(message, f"🎉 *Redeemed Successfully!*\n\n+{points} Credits added.\n*Total Balance:* `{new_bal}` Credits.", parse_mode="Markdown")
+            bot.reply_to(message, f"🎉 <b>Redeemed Successfully!</b>\n\n+{points} Credits added.\n<b>Total Balance:</b> <code>{new_bal}</code> Credits.", parse_mode="HTML", reply_markup=get_main_menu(message.chat.id))
         else:
             bot.reply_to(message, "❌ Invalid ya used Coupon code.")
     except Exception:
-        bot.reply_to(message, "Usage: `/redeem <coupon_code>`")
+        bot.reply_to(message, "Usage: <code>/redeem &lt;coupon_code&gt;</code>", parse_mode="HTML")
 
-# ----------------- BROADCAST COMMAND -----------------
 @bot.message_handler(commands=['broadcast'])
 def broadcast_command(message):
-    if message.from_user.id != ADMIN_ID:
-        return
+    if message.from_user.id != ADMIN_ID: return
     text = message.text.replace("/broadcast", "").strip()
     if not text:
-        bot.reply_to(message, "Usage: `/broadcast Aapka message`")
+        bot.reply_to(message, "Usage: <code>/broadcast Aapka message</code>", parse_mode="HTML")
         return
 
     cursor.execute("SELECT user_id FROM users")
@@ -497,72 +321,72 @@ def broadcast_command(message):
             pass
     bot.reply_to(message, f"✅ Broadcast sent to {count} users!")
 
-# ----------------- RC SEARCH HANDLER -----------------
+# ----------------- RC SEARCH & MENU HANDLER -----------------
 @bot.message_handler(func=lambda msg: True)
 def process_vehicle_search(message):
+    text = message.text.strip()
     user_id = message.chat.id
     credits = get_user_credits(user_id)
 
-    raw = message.text.strip()
-    rc = re.sub(r'[^A-Z0-9]', '', raw.upper())
-
-    if len(rc) < 6 or len(rc) > 12:
-        bot.reply_to(message, "⚠️ Sahi RC format bhejain (e.g. `DL01AB1234`).", parse_mode="Markdown")
-        return
-
-    if credits < 1:
-        bot.reply_to(message, "❌ *Insufficient Balance!*\n\n1 Search karne ke liye ₹5 (1 Credit) zaroori hai.", parse_mode="Markdown")
+    if text == "💳 Buy Credits (QR)":
         send_auto_qr_screen(user_id, amount=5)
         return
 
-    load_msg = bot.reply_to(message, f"🔍 Searching details for `{rc}`... (-1 Credit)")
+    if text.startswith("💰 Balance"):
+        bot.reply_to(message, f"Aapka balance: {credits} Searches hai.", reply_markup=get_main_menu(user_id))
+        return
 
-    last5, reg = get_vehicle_data(rc)
-    if not last5:
-        bot.edit_message_text(f"❌ RC `{rc}` nahi mili. Balance deduct nahi hua.", chat_id=message.chat.id, message_id=load_msg.message_id)
+    if text.startswith('/'): return
+
+    rc = re.sub(r'[^A-Z0-9]', '', text.upper())
+    if len(rc) < 6 or len(rc) > 12:
+        bot.reply_to(message, "⚠️ Sahi RC format bhejein (e.g. <code>DL01AB1234</code>).", parse_mode="HTML")
+        return
+
+    if credits < 1:
+        bot.reply_to(message, "❌ <b>Insufficient Balance!</b>\n\n1 Search karne ke liye ₹5 (1 Credit) zaroori hai.", parse_mode="HTML")
+        send_auto_qr_screen(user_id, amount=5)
+        return
+
+    load_msg = bot.reply_to(message, f"🔍 Searching details for <code>{rc}</code>... (-1 Credit)", parse_mode="HTML")
+    
+    reg = get_vehicle_data(rc)
+    if not reg:
+        bot.edit_message_text(f"❌ RC <code>{rc}</code> records nahi mile. Balance deduct nahi hua.", chat_id=user_id, message_id=load_msg.message_id, parse_mode="HTML")
         return
 
     remaining = update_user_credits(user_id, -1)
-    mob_res = get_mobile(rc, last5)
-
-    mobile = mob_res.get('mobile', 'Not Available')
-    last5_show = mob_res.get('chassis_last5', safe_get(reg, 'chassis')[-5:])
 
     res = (
-        "🚗 *VEHICLE RC DETAILS*\n"
+        "🚗 <b>VEHICLE RC DETAILS</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "👤 *OWNER DETAILS*\n"
-        f"• *Owner Name:* {safe_get(reg, 'owner')}\n"
-        f"• *Father Name:* {safe_get(reg, 'father')}\n"
-        f"• *📱 Mobile No:* `{mobile}`\n"
-        f"• *Status:* {safe_get(reg, 'status')}\n\n"
-        "📋 *REGISTRATION*\n"
-        f"• *RC Number:* `{safe_get(reg, 'reg_no')}`\n"
-        f"• *Reg Date:* {safe_get(reg, 'reg_date')}\n"
-        f"• *RTO Authority:* {safe_get(reg, 'reg_authority')}\n\n"
-        "🚘 *SPECIFICATIONS*\n"
-        f"• *Model:* {safe_get(reg, 'manufacturer')} {safe_get(reg, 'model')}\n"
-        f"• *Fuel:* {safe_get(reg, 'fuel')}\n"
-        f"• *Engine No:* `{safe_get(reg, 'engine')}`\n"
-        f"• *Chassis No:* `***{last5_show}`\n\n"
-        "🛡️ *INSURANCE*\n"
-        f"• *Company:* {safe_get(reg, 'ins_company')}\n"
-        f"• *Valid Till:* {safe_get(reg, 'ins_valid')}\n\n"
-        "🏠 *ADDRESS*\n"
-        f"• *Present:* {safe_get(reg, 'present_addr')}\n"
+        "👤 <b>OWNER DETAILS</b>\n"
+        f"• <b>Owner Name:</b> {reg['owner']}\n"
+        f"• <b>Father Name:</b> {reg['father']}\n"
+        f"• 📱 <b>Mobile No:</b> <code>{reg['mobile']}</code>\n"
+        f"• <b>Status:</b> {reg['status']}\n\n"
+        "📋 <b>REGISTRATION</b>\n"
+        f"• <b>RC Number:</b> {reg['reg_no']}\n"
+        f"• <b>Reg Date:</b> {reg['reg_date']}\n"
+        f"• <b>RTO Authority:</b> {reg['rto']}\n\n"
+        "🚘 <b>SPECIFICATIONS</b>\n"
+        f"• <b>Model:</b> {reg['model']}\n"
+        f"• <b>Fuel:</b> {reg['fuel']}\n"
+        f"• <b>Engine No:</b> <code>{reg['engine']}</code>\n"
+        f"• <b>Chassis No:</b> <code>{reg['chassis']}</code>\n\n"
+        "🛡️ <b>INSURANCE</b>\n"
+        f"• <b>Company:</b> {reg['ins_company']}\n"
+        f"• <b>Valid Till:</b> {reg['ins_valid']}\n\n"
+        "🏠 <b>ADDRESS</b>\n"
+        f"• <b>Present:</b> {reg['present_addr']}\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💰 *Remaining Balance:* `{remaining}` Credits"
+        f"💰 <b>Remaining Balance:</b> {remaining} Credits"
     )
 
-    bot.edit_message_text(res, chat_id=message.chat.id, message_id=load_msg.message_id, parse_mode="Markdown")
+    try:
+        bot.edit_message_text(res, chat_id=user_id, message_id=load_msg.message_id, parse_mode="HTML", reply_markup=get_main_menu(user_id))
+    except Exception:
+        bot.edit_message_text(res.replace("<b>", "").replace("</b>", "").replace("<code>", "").replace("</code>", "").replace("<i>", "").replace("</i>", ""), chat_id=user_id, message_id=load_msg.message_id, reply_markup=get_main_menu(user_id))
 
 if __name__ == '__main__':
     bot.infinity_polling()
-
-
-
-Ye code me api change karo
-
-https://vehicle-eight-vert.vercel.app/api?rc=KL43G1669
-
-Ye wala
