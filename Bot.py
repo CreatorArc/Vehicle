@@ -130,7 +130,7 @@ def send_auto_qr_screen(chat_id, message_id=None, amount=5):
 
     bot.send_photo(chat_id, qr_url, caption=caption, parse_mode="Markdown", reply_markup=markup)
 
-# ----------------- VEHICLE SCRAPER LOGIC -----------------
+# ----------------- VEHICLE & MOBILE SCRAPER -----------------
 def safe_get(d, key, default='N/A'):
     val = d.get(key, '')
     return default if (val == '' or val is None) else str(val)
@@ -180,58 +180,165 @@ def get_vehicle_data(rc):
 
 def get_mobile(rc, last5):
     session = requests.Session()
-    BASE = {'User-Agent': 'Mozilla/5.0', 'Accept-Language': 'en-US,en;q=0.9'}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-IN,en-GB;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1'
+    }
+    session.headers.update(headers)
+
     HP = 'https://vahan.parivahan.gov.in/vahanservice/vahan/ui/statevalidation/homepage.xhtml?statecd=Mzc2MzM2MzAzNjY0MzIzODM3NjIzNjY0MzY2MjM3NDQ0Yw=='
     HB = 'https://vahan.parivahan.gov.in/vahanservice/vahan/ui/statevalidation/homepage.xhtml'
     LI = 'https://vahan.parivahan.gov.in/vahanservice/vahan/ui/usermgmt/login.xhtml'
     FR = 'https://vahan.parivahan.gov.in/vahanservice/vahan/ui/balanceservice/form_reschedule_fitness.xhtml'
 
-    for attempt in range(2):
+    for attempt in range(3):
         try:
-            r = session.get(HP, headers=BASE, timeout=25)
+            r = session.get(HP, timeout=25)
             vs = re.search(r'<input[^>]*name="javax\.faces\.ViewState"[^>]*value="([^"]+)"', r.text)
             if not vs:
+                time.sleep(1)
                 continue
             vs = vs.group(1)
 
-            AH = {'Accept': 'application/xml, text/xml, */*; q=0.01', 'Content-Type': 'application/x-www-form-urlencoded', 'Faces-Request': 'partial/ajax', 'X-Requested-With': 'XMLHttpRequest', 'Origin': 'https://vahan.parivahan.gov.in', 'Referer': HP}
-            r = session.post(HB, headers=AH, data={'javax.faces.partial.ajax': 'true', 'javax.faces.source': 'fit_c_office_to', 'javax.faces.partial.execute': 'fit_c_office_to', 'javax.faces.behavior.event': 'change', 'homepageformid': 'homepageformid', 'fit_c_office_to_input': '1', 'javax.faces.ViewState': vs}, timeout=20)
+            cid = 'j_idt193'
+            cm = re.search(r'<div[^>]*id="(j_idt\d+)"[^>]*class="[^"]*ui-chkbox', r.text)
+            if cm:
+                cid = cm.group(1)
+
+            AH = {
+                'Accept': 'application/xml, text/xml, */*; q=0.01',
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'Faces-Request': 'partial/ajax',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Origin': 'https://vahan.parivahan.gov.in',
+                'Referer': HP
+            }
+
+            r = session.post(HB, headers=AH, data={
+                'javax.faces.partial.ajax': 'true',
+                'javax.faces.source': 'fit_c_office_to',
+                'javax.faces.partial.execute': 'fit_c_office_to',
+                'javax.faces.behavior.event': 'change',
+                'homepageformid': 'homepageformid',
+                'fit_c_office_to_input': '1',
+                'javax.faces.ViewState': vs
+            }, timeout=20)
             m = re.search(r'<update id="j_id1:javax\.faces\.ViewState:0"><!\[CDATA\[(.*?)\]\]></update>', r.text)
             if m: vs = m.group(1)
 
-            r = session.post(HB, headers=AH, data={'javax.faces.partial.ajax': 'true', 'javax.faces.source': 'proccedHomeButtonId', 'javax.faces.partial.execute': '@all', 'proccedHomeButtonId': 'proccedHomeButtonId', 'homepageformid': 'homepageformid', 'j_idt193_input': 'on', 'javax.faces.ViewState': vs}, timeout=20)
+            r = session.post(HB, headers=AH, data={
+                'javax.faces.partial.ajax': 'true',
+                'javax.faces.source': cid,
+                'javax.faces.partial.execute': cid,
+                'javax.faces.partial.render': 'proccedHomeButtonId',
+                'javax.faces.behavior.event': 'change',
+                'homepageformid': 'homepageformid',
+                f'{cid}_input': 'on',
+                'javax.faces.ViewState': vs
+            }, timeout=20)
             m = re.search(r'<update id="j_id1:javax\.faces\.ViewState:0"><!\[CDATA\[(.*?)\]\]></update>', r.text)
             if m: vs = m.group(1)
 
-            r = session.post(HB, headers=AH, data={'javax.faces.partial.ajax': 'true', 'javax.faces.source': 'j_idt536', 'javax.faces.partial.execute': '@all', 'j_idt536': 'j_idt536', 'homepageformid': 'homepageformid', 'j_idt193_input': 'on', 'javax.faces.ViewState': vs}, timeout=20)
+            r = session.post(HB, headers=AH, data={
+                'javax.faces.partial.ajax': 'true',
+                'javax.faces.source': 'proccedHomeButtonId',
+                'javax.faces.partial.execute': '@all',
+                'proccedHomeButtonId': 'proccedHomeButtonId',
+                'homepageformid': 'homepageformid',
+                f'{cid}_input': 'on',
+                'javax.faces.ViewState': vs
+            }, timeout=20)
             m = re.search(r'<update id="j_id1:javax\.faces\.ViewState:0"><!\[CDATA\[(.*?)\]\]></update>', r.text)
             if m: vs = m.group(1)
 
-            r = session.get(LI + '?faces-redirect=true', headers={**BASE, 'Referer': HP}, timeout=20)
+            dlg = 'j_idt536'
+            dm = re.search(r'id="(j_idt\d+)"[^>]*class="[^"]*ui-button', r.text)
+            if dm: dlg = dm.group(1)
+
+            r = session.post(HB, headers=AH, data={
+                'javax.faces.partial.ajax': 'true',
+                'javax.faces.source': dlg,
+                'javax.faces.partial.execute': '@all',
+                dlg: dlg,
+                'homepageformid': 'homepageformid',
+                f'{cid}_input': 'on',
+                'javax.faces.ViewState': vs
+            }, timeout=20)
+            m = re.search(r'<update id="j_id1:javax\.faces\.ViewState:0"><!\[CDATA\[(.*?)\]\]></update>', r.text)
+            if m: vs = m.group(1)
+
+            r = session.get(LI + '?faces-redirect=true', headers={**headers, 'Referer': HP}, timeout=20)
             vs = re.search(r'<input[^>]*name="javax\.faces\.ViewState"[^>]*value="([^"]+)"', r.text)
             if not vs:
+                time.sleep(1)
                 continue
             vs = vs.group(1)
 
-            session.post(LI, headers={**BASE, 'Content-Type': 'application/x-www-form-urlencoded', 'Origin': 'https://vahan.parivahan.gov.in', 'Referer': LI + '?faces-redirect=true'}, data={'loginForm': 'loginForm', 'j_idt506': 'j_idt506', 'javax.faces.ViewState': vs, 'fitbalcTest': 'fitbalcTest', 'pur_cd': '86'}, timeout=20)
-            r = session.get(FR, headers={**BASE, 'Referer': LI + '?faces-redirect=true'}, timeout=20)
+            fit = 'j_idt506'
+            fm = re.search(r'id="(j_idt\d+)"[^>]*type="submit"', r.text)
+            if fit and fm: fit = fm.group(1)
+
+            session.post(LI, headers={
+                **headers,
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Origin': 'https://vahan.parivahan.gov.in',
+                'Referer': LI + '?faces-redirect=true'
+            }, data={
+                'loginForm': 'loginForm',
+                fit: fit,
+                'javax.faces.ViewState': vs,
+                'fitbalcTest': 'fitbalcTest',
+                'pur_cd': '86'
+            }, timeout=20)
+
+            r = session.get(FR, headers={**headers, 'Referer': LI + '?faces-redirect=true'}, timeout=20)
             vs = re.search(r'<input[^>]*name="javax\.faces\.ViewState"[^>]*value="([^"]+)"', r.text)
             if not vs:
+                time.sleep(1)
                 continue
             vs = vs.group(1)
 
-            r = session.post(FR, headers={**AH, 'Referer': FR}, data={'javax.faces.partial.ajax': 'true', 'javax.faces.source': 'balanceFeesFine:validate_dtls', 'javax.faces.partial.execute': '@all', 'javax.faces.partial.render': 'balanceFeesFine:auth_panel', 'balanceFeesFine:validate_dtls': 'balanceFeesFine:validate_dtls', 'balanceFeesFine': 'balanceFeesFine', 'balanceFeesFine:tf_reg_no': rc, 'balanceFeesFine:tf_chasis_no': last5, 'javax.faces.ViewState': vs}, timeout=20)
+            r = session.post(FR, headers={**AH, 'Referer': FR}, data={
+                'javax.faces.partial.ajax': 'true',
+                'javax.faces.source': 'balanceFeesFine:validate_dtls',
+                'javax.faces.partial.execute': '@all',
+                'javax.faces.partial.render': 'balanceFeesFine:auth_panel',
+                'balanceFeesFine:validate_dtls': 'balanceFeesFine:validate_dtls',
+                'balanceFeesFine': 'balanceFeesFine',
+                'balanceFeesFine:tf_reg_no': rc,
+                'balanceFeesFine:tf_chasis_no': last5,
+                'javax.faces.ViewState': vs
+            }, timeout=20)
+
+            patterns = [
+                r'id="balanceFeesFine:tf_mobile"[^>]*value="(\d{10})"',
+                r'value="(\d{10})"[^>]*id="balanceFeesFine:tf_mobile"',
+                r'tf_mobile[^>]*value="(\d{10})"'
+            ]
+            for p in patterns:
+                mo = re.search(p, r.text)
+                if mo and mo.group(1)[0] in '6789':
+                    return {'success': True, 'mobile': mo.group(1), 'chassis_last5': last5}
+
             nums = re.findall(r'\b[6-9]\d{9}\b', r.text)
             if nums:
                 return {'success': True, 'mobile': nums[0], 'chassis_last5': last5}
-        except Exception:
-            pass
-        if attempt == 0:
-            time.sleep(2)
+
+        except Exception as err:
+            print(f"Fetch Error (Attempt {attempt+1}): {err}")
+        
+        time.sleep(2)
 
     return {'success': False, 'mobile': 'Not Available', 'chassis_last5': last5}
 
-# ----------------- BOT COMMANDS -----------------
+# ----------------- BOT COMMANDS & UI -----------------
 @bot.message_handler(commands=['start'])
 def start_msg(message):
     credits = get_user_credits(message.chat.id)
@@ -267,7 +374,6 @@ def auto_verify_payment(call):
     order_id = call.data.split("_")[1]
     user_id = call.message.chat.id
 
-    # Check if already processed
     cursor.execute("SELECT order_id FROM processed_orders WHERE order_id = ?", (order_id,))
     if cursor.fetchone():
         bot.answer_callback_query(call.id, "⚠️ This payment is already credited!", show_alert=True)
@@ -290,7 +396,6 @@ def auto_verify_payment(call):
             points_gained = int(amount // 5)
             new_bal = update_user_credits(user_id, points_gained)
 
-            # Record order to prevent reuse
             cursor.execute("INSERT INTO processed_orders (order_id, user_id, amount, points, created_at) VALUES (?, ?, ?, ?, ?)", 
                            (order_id, user_id, amount, points_gained, time.strftime('%Y-%m-%d %H:%M:%S')))
             conn.commit()
@@ -310,7 +415,6 @@ def auto_verify_payment(call):
                 parse_mode="Markdown"
             )
 
-            # Admin Notification
             bot.send_message(
                 ADMIN_ID,
                 f"🔔 *New Auto-Payment Received!*\n\n"
