@@ -32,7 +32,7 @@ PAYTM_UPI = "paytmqr2810050501011gv6cueh16my@paytm"
 
 QR_API_URL = "https://paytms.aimbotaxe4.workers.dev"
 VERIFY_API_URL = "https://paytmv.aimbotaxe4.workers.dev"
-VEHICLE_API = "https://vehicle-eight-vert.vercel.app/api?rc="
+VEHICLE_API = "https://vehicle-chass.vercel.app/api/vehicle?rc="
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
 bot.remove_webhook()
@@ -137,7 +137,7 @@ def send_auto_qr_screen(chat_id, message_id=None, amount=5):
 
     bot.send_photo(chat_id, qr_url, caption=caption, parse_mode="HTML", reply_markup=markup)
 
-# ----------------- VEHICLE DATA FETCHER -----------------
+# ----------------- VEHICLE DATA FETCHER (OLD API) -----------------
 def safe_clean(val, default='N/A'):
     if val in [None, '', 'null', 'None', 'N/A']:
         return default
@@ -151,44 +151,33 @@ def get_vehicle_data(rc):
             return None
             
         data = response.json()
-        if not data or not isinstance(data, dict) or data.get('error'):
+        if not data.get('success', False):
             return None
 
-        v = data.get('vehicle', {}) if isinstance(data.get('vehicle'), dict) else {}
-        s = data.get('specifications', {}) if isinstance(data.get('specifications'), dict) else {}
-        ins = data.get('insurance', {}) if isinstance(data.get('insurance'), dict) else {}
-        addr = data.get('address', {}) if isinstance(data.get('address'), dict) else {}
+        v = data.get('vehicle', {})
+        s = data.get('specifications', {})
+        ins = data.get('insurance', {})
+        addr = data.get('address', {})
 
-        owner = data.get('owner_name') or data.get('OwnerName') or data.get('owner') or v.get('Owner') or v.get('owner_name')
-        father = data.get('father_name') or data.get('FatherName') or data.get('father') or v.get('Father Name')
-        reg_no = data.get('reg_no') or data.get('RegistrationNumber') or data.get('rc_number') or v.get('Registration Number') or rc
-        reg_date = data.get('reg_date') or data.get('RegistrationDate') or data.get('registration_date') or v.get('Registration Date')
-        rto = data.get('rto') or data.get('RegistrationAuthority') or data.get('reg_authority') or v.get('Registration Authority')
-        model = data.get('maker_model') or data.get('model') or data.get('Model') or f"{s.get('Manufacturer', '')} {s.get('Model', '')}".strip()
-        fuel = data.get('fuel_type') or data.get('fuel') or data.get('FuelType') or s.get('Fuel Type')
-        engine = data.get('engine_no') or data.get('EngineNumber') or data.get('engine') or s.get('Engine Number')
-        chassis = data.get('chassis_no') or data.get('ChassisNumber') or data.get('chassis') or s.get('Chassis Number')
-        ins_comp = data.get('insurance_company') or data.get('InsuranceCompany') or data.get('insurance') or ins.get('Company')
-        ins_valid = data.get('insurance_valid_till') or data.get('InsuranceValidTill') or data.get('insurance_expiry') or ins.get('Valid Till')
-        present_addr = data.get('address') or data.get('PresentAddress') or data.get('present_address') or data.get('permanent_address') or addr.get('Present Address')
-        mobile = data.get('mobile') or data.get('mobile_no') or data.get('phone') or 'Not Available'
-        status = data.get('status') or data.get('Status') or data.get('rc_status') or v.get('Status') or 'ACTIVE'
+        chassis = s.get('Chassis Number') or ''
+        if not chassis:
+            return None
 
         return {
-            'owner': safe_clean(owner),
-            'father': safe_clean(father),
-            'reg_no': safe_clean(reg_no),
-            'reg_date': safe_clean(reg_date),
-            'rto': safe_clean(rto),
-            'model': safe_clean(model),
-            'fuel': safe_clean(fuel),
-            'engine': safe_clean(engine),
+            'owner': safe_clean(v.get('Owner')),
+            'father': safe_clean(v.get('Father Name')),
+            'reg_no': safe_clean(v.get('Registration Number', rc)),
+            'reg_date': safe_clean(v.get('Registration Date')),
+            'rto': safe_clean(v.get('Registration Authority')),
+            'model': safe_clean(f"{s.get('Manufacturer', '')} {s.get('Model', '')}".strip()),
+            'fuel': safe_clean(s.get('Fuel Type')),
+            'engine': safe_clean(s.get('Engine Number')),
             'chassis': safe_clean(chassis),
-            'ins_company': safe_clean(ins_comp),
-            'ins_valid': safe_clean(ins_valid),
-            'present_addr': safe_clean(present_addr),
-            'mobile': safe_clean(mobile),
-            'status': safe_clean(status)
+            'ins_company': safe_clean(ins.get('Company')),
+            'ins_valid': safe_clean(ins.get('Valid Till')),
+            'present_addr': safe_clean(addr.get('Present Address')),
+            'mobile': 'Not Available',
+            'status': safe_clean(v.get('Status', 'ACTIVE'))
         }
     except Exception:
         return None
