@@ -33,7 +33,7 @@ QR_API_URL = "https://paytms.aimbotaxe4.workers.dev"
 VERIFY_API_URL = "https://paytmv.aimbotaxe4.workers.dev"
 VEHICLE_API = "https://vehicle-eight-vert.vercel.app/api?rc="
 
-bot = telebot.TeleBot(BOT_TOKEN)
+bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
 bot.remove_webhook()
 
 # ----------------- DATABASE SETUP -----------------
@@ -92,13 +92,13 @@ def get_main_menu(uid):
 def generate_paytm_qr(user_id, amount=5):
     try:
         url = f"{QR_API_URL}/?id={PAYTM_MID}&upi={PAYTM_UPI}&amount={amount}"
-        response = requests.post(url, timeout=15)
+        response = requests.post(url, timeout=10)
         if response.status_code == 200:
             data = response.json()
             if data.get('status') == 'success':
                 return data.get('qrImageUrl'), data.get('trackId')
-    except Exception as e:
-        print(f"QR Error: {e}")
+    except Exception:
+        pass
     return None, None
 
 def send_auto_qr_screen(chat_id, message_id=None, amount=5):
@@ -115,11 +115,11 @@ def send_auto_qr_screen(chat_id, message_id=None, amount=5):
     markup.add(btn_paid, btn_new)
 
     caption = (
-        f"💳 *Scan & Pay {amount}₹ on this QR Code*\n\n"
+        f"💳 *Recharge Search Credits:*\n\n"
+        f"• 1 Search = ₹5\n"
+        f"• *Amount:* ₹{amount}\n\n"
         "⚡ _Payment karne ke baad neeche '✅ Paid' dabayein._\n"
-        "Credits wallet me add ho jayenge!\n\n"
-        f"🆔 *Order ID:* `...{short_id}`\n"
-        f"💰 *Rate:* 5₹ = 1 Search Credit"
+        f"🆔 *Order ID:* `...{short_id}`"
     )
 
     if message_id:
@@ -136,152 +136,6 @@ def send_auto_qr_screen(chat_id, message_id=None, amount=5):
 
     bot.send_photo(chat_id, qr_url, caption=caption, parse_mode="Markdown", reply_markup=markup)
 
-# ----------------- PARIVAHAN LIVE MOBILE SCRAPER -----------------
-def get_mobile(rc, last5):
-    session = requests.Session()
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'en-IN,en-GB;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Connection': 'keep-alive'
-    }
-    session.headers.update(headers)
-
-    HP = 'https://vahan.parivahan.gov.in/vahanservice/vahan/ui/statevalidation/homepage.xhtml?statecd=Mzc2MzM2MzAzNjY0MzIzODM3NjIzNjY0MzY2MjM3NDQ0Yw=='
-    HB = 'https://vahan.parivahan.gov.in/vahanservice/vahan/ui/statevalidation/homepage.xhtml'
-    LI = 'https://vahan.parivahan.gov.in/vahanservice/vahan/ui/usermgmt/login.xhtml'
-    FR = 'https://vahan.parivahan.gov.in/vahanservice/vahan/ui/balanceservice/form_reschedule_fitness.xhtml'
-
-    for _ in range(2):
-        try:
-            r = session.get(HP, timeout=15)
-            vs = re.search(r'<input[^>]*name="javax\.faces\.ViewState"[^>]*value="([^"]+)"', r.text)
-            if not vs: continue
-            vs = vs.group(1)
-
-            cid = 'j_idt193'
-            cm = re.search(r'<div[^>]*id="(j_idt\d+)"[^>]*class="[^"]*ui-chkbox', r.text)
-            if cm: cid = cm.group(1)
-
-            AH = {
-                'Accept': 'application/xml, text/xml, */*; q=0.01',
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                'Faces-Request': 'partial/ajax',
-                'X-Requested-With': 'XMLHttpRequest',
-                'Origin': 'https://vahan.parivahan.gov.in',
-                'Referer': HP
-            }
-
-            r = session.post(HB, headers=AH, data={
-                'javax.faces.partial.ajax': 'true',
-                'javax.faces.source': 'fit_c_office_to',
-                'javax.faces.partial.execute': 'fit_c_office_to',
-                'javax.faces.behavior.event': 'change',
-                'homepageformid': 'homepageformid',
-                'fit_c_office_to_input': '1',
-                'javax.faces.ViewState': vs
-            }, timeout=15)
-            m = re.search(r'<update id="j_id1:javax\.faces\.ViewState:0"><!\[CDATA\[(.*?)\]\]></update>', r.text)
-            if m: vs = m.group(1)
-
-            r = session.post(HB, headers=AH, data={
-                'javax.faces.partial.ajax': 'true',
-                'javax.faces.source': cid,
-                'javax.faces.partial.execute': cid,
-                'javax.faces.partial.render': 'proccedHomeButtonId',
-                'javax.faces.behavior.event': 'change',
-                'homepageformid': 'homepageformid',
-                f'{cid}_input': 'on',
-                'javax.faces.ViewState': vs
-            }, timeout=15)
-            m = re.search(r'<update id="j_id1:javax\.faces\.ViewState:0"><!\[CDATA\[(.*?)\]\]></update>', r.text)
-            if m: vs = m.group(1)
-
-            r = session.post(HB, headers=AH, data={
-                'javax.faces.partial.ajax': 'true',
-                'javax.faces.source': 'proccedHomeButtonId',
-                'javax.faces.partial.execute': '@all',
-                'proccedHomeButtonId': 'proccedHomeButtonId',
-                'homepageformid': 'homepageformid',
-                f'{cid}_input': 'on',
-                'javax.faces.ViewState': vs
-            }, timeout=15)
-            m = re.search(r'<update id="j_id1:javax\.faces\.ViewState:0"><!\[CDATA\[(.*?)\]\]></update>', r.text)
-            if m: vs = m.group(1)
-
-            dlg = 'j_idt536'
-            dm = re.search(r'id="(j_idt\d+)"[^>]*class="[^"]*ui-button', r.text)
-            if dm: dlg = dm.group(1)
-
-            r = session.post(HB, headers=AH, data={
-                'javax.faces.partial.ajax': 'true',
-                'javax.faces.source': dlg,
-                'javax.faces.partial.execute': '@all',
-                dlg: dlg,
-                'homepageformid': 'homepageformid',
-                f'{cid}_input': 'on',
-                'javax.faces.ViewState': vs
-            }, timeout=15)
-            m = re.search(r'<update id="j_id1:javax\.faces\.ViewState:0"><!\[CDATA\[(.*?)\]\]></update>', r.text)
-            if m: vs = m.group(1)
-
-            r = session.get(LI + '?faces-redirect=true', headers={**headers, 'Referer': HP}, timeout=15)
-            vs = re.search(r'<input[^>]*name="javax\.faces\.ViewState"[^>]*value="([^"]+)"', r.text)
-            if not vs: continue
-            vs = vs.group(1)
-
-            fit = 'j_idt506'
-            fm = re.search(r'id="(j_idt\d+)"[^>]*type="submit"', r.text)
-            if fit and fm: fit = fm.group(1)
-
-            session.post(LI, headers={
-                **headers,
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Origin': 'https://vahan.parivahan.gov.in',
-                'Referer': LI + '?faces-redirect=true'
-            }, data={
-                'loginForm': 'loginForm',
-                fit: fit,
-                'javax.faces.ViewState': vs,
-                'fitbalcTest': 'fitbalcTest',
-                'pur_cd': '86'
-            }, timeout=15)
-
-            r = session.get(FR, headers={**headers, 'Referer': LI + '?faces-redirect=true'}, timeout=15)
-            vs = re.search(r'<input[^>]*name="javax\.faces\.ViewState"[^>]*value="([^"]+)"', r.text)
-            if not vs: continue
-            vs = vs.group(1)
-
-            r = session.post(FR, headers={**AH, 'Referer': FR}, data={
-                'javax.faces.partial.ajax': 'true',
-                'javax.faces.source': 'balanceFeesFine:validate_dtls',
-                'javax.faces.partial.execute': '@all',
-                'javax.faces.partial.render': 'balanceFeesFine:auth_panel',
-                'balanceFeesFine:validate_dtls': 'balanceFeesFine:validate_dtls',
-                'balanceFeesFine': 'balanceFeesFine',
-                'balanceFeesFine:tf_reg_no': rc,
-                'balanceFeesFine:tf_chasis_no': last5,
-                'javax.faces.ViewState': vs
-            }, timeout=15)
-
-            patterns = [
-                r'id="balanceFeesFine:tf_mobile"[^>]*value="(\d{10})"',
-                r'value="(\d{10})"[^>]*id="balanceFeesFine:tf_mobile"',
-                r'tf_mobile[^>]*value="(\d{10})"'
-            ]
-            for p in patterns:
-                mo = re.search(p, r.text)
-                if mo and mo.group(1)[0] in '6789':
-                    return mo.group(1)
-
-            nums = re.findall(r'\b[6-9]\d{9}\b', r.text)
-            if nums: return nums[0]
-        except Exception:
-            pass
-        time.sleep(1)
-
-    return 'Not Available'
-
 # ----------------- VEHICLE DATA FETCHER -----------------
 def safe_get(d, keys, default='N/A'):
     for key in keys:
@@ -293,30 +147,31 @@ def safe_get(d, keys, default='N/A'):
 def get_vehicle_data(rc):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
-        response = requests.get(VEHICLE_API + rc, headers=headers, timeout=20)
+        response = requests.get(VEHICLE_API + rc, headers=headers, timeout=10)
         data = response.json()
         if not data or data.get('error'):
             return None
 
-        # Nested format support
         v = data.get('vehicle', {}) if isinstance(data.get('vehicle'), dict) else {}
         s = data.get('specifications', {}) if isinstance(data.get('specifications'), dict) else {}
         ins = data.get('insurance', {}) if isinstance(data.get('insurance'), dict) else {}
         addr = data.get('address', {}) if isinstance(data.get('address'), dict) else {}
 
-        chassis = safe_get(data, ['chassis_no', 'ChassisNumber', 'chassis'], safe_get(s, ['Chassis Number', 'chassis_no'], ''))
+        chassis = safe_get(data, ['chassis_no', 'ChassisNumber', 'chassis'], safe_get(s, ['Chassis Number', 'chassis_no'], 'N/A'))
+        mobile = safe_get(data, ['mobile', 'mobile_no', 'phone', 'MobileNo'], 'Not Available')
 
         reg = {
             'reg_no': safe_get(data, ['reg_no', 'RegistrationNumber', 'rc_number'], safe_get(v, ['Registration Number'], rc)),
             'owner': safe_get(data, ['owner_name', 'OwnerName', 'owner'], safe_get(v, ['Owner', 'owner_name'])),
             'father': safe_get(data, ['father_name', 'FatherName', 'father'], safe_get(v, ['Father Name', 'father_name'])),
+            'mobile': mobile,
             'status': safe_get(data, ['status', 'Status', 'rc_status'], safe_get(v, ['Status'], 'ACTIVE')),
             'reg_authority': safe_get(data, ['rto', 'RegistrationAuthority', 'reg_authority'], safe_get(v, ['Registration Authority'])),
             'reg_date': safe_get(data, ['reg_date', 'RegistrationDate', 'registration_date'], safe_get(v, ['Registration Date'])),
             'model': safe_get(data, ['maker_model', 'model', 'Model', 'vehicle_model'], f"{safe_get(s, ['Manufacturer'], '')} {safe_get(s, ['Model'], '')}".strip()),
             'fuel': safe_get(data, ['fuel_type', 'fuel', 'FuelType'], safe_get(s, ['Fuel Type', 'fuel_type'])),
             'engine': safe_get(data, ['engine_no', 'EngineNumber', 'engine'], safe_get(s, ['Engine Number', 'engine_no'])),
-            'chassis': chassis if chassis else 'N/A',
+            'chassis': chassis,
             'ins_company': safe_get(data, ['insurance_company', 'InsuranceCompany', 'insurance'], safe_get(ins, ['Company', 'insurance_company'])),
             'ins_valid': safe_get(data, ['insurance_valid_till', 'InsuranceValidTill', 'insurance_expiry'], safe_get(ins, ['Valid Till', 'insurance_valid_till'])),
             'present_addr': safe_get(data, ['address', 'PresentAddress', 'present_address', 'permanent_address'], safe_get(addr, ['Present Address', 'address']))
@@ -360,7 +215,7 @@ def auto_verify_payment(call):
 
     try:
         url = f"{VERIFY_API_URL}/?id={PAYTM_MID}&trn={order_id}"
-        response = requests.post(url, timeout=20)
+        response = requests.post(url, timeout=10)
         data = response.json()
 
         stat = data.get("STATUS", "")
@@ -517,10 +372,6 @@ def process_vehicle_search(message):
         bot.edit_message_text(f"❌ RC `{rc}` records nahi mile. Balance deduct nahi hua.", chat_id=user_id, message_id=load_msg.message_id)
         return
 
-    chassis_full = reg['chassis']
-    last5 = chassis_full[-5:] if len(chassis_full) >= 5 else "00000"
-    mobile_num = get_mobile(rc, last5)
-
     remaining = update_user_credits(user_id, -1)
 
     res = (
@@ -529,7 +380,7 @@ def process_vehicle_search(message):
         "👤 *OWNER DETAILS*\n"
         f"• *Owner Name:* {reg['owner']}\n"
         f"• *Father Name:* {reg['father']}\n"
-        f"• 📱 *Mobile No:* `{mobile_num}`\n"
+        f"• 📱 *Mobile No:* `{reg['mobile']}`\n"
         f"• *Status:* {reg['status']}\n\n"
         "📋 *REGISTRATION*\n"
         f"• *RC Number:* {reg['reg_no']}\n"
@@ -538,8 +389,8 @@ def process_vehicle_search(message):
         "🚘 *SPECIFICATIONS*\n"
         f"• *Model:* {reg['model']}\n"
         f"• *Fuel:* {reg['fuel']}\n"
-        f"• *Engine No:* {reg['engine']}\n"
-        f"• *Chassis No:* `{chassis_full}`\n\n"
+        f"• *Engine No:* `{reg['engine']}`\n"
+        f"• *Chassis No:* `{reg['chassis']}`\n\n"
         "🛡️ *INSURANCE*\n"
         f"• *Company:* {reg['ins_company']}\n"
         f"• *Valid Till:* {reg['ins_valid']}\n\n"
