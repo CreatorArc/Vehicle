@@ -4,6 +4,7 @@ import time
 import sqlite3
 import threading
 import uuid
+import html
 import requests
 from flask import Flask
 import telebot
@@ -92,7 +93,7 @@ def get_main_menu(uid):
 def generate_paytm_qr(user_id, amount=5):
     try:
         url = f"{QR_API_URL}/?id={PAYTM_MID}&upi={PAYTM_UPI}&amount={amount}"
-        response = requests.post(url, timeout=7)
+        response = requests.post(url, timeout=10)
         if response.status_code == 200:
             data = response.json()
             if data.get('status') == 'success':
@@ -136,16 +137,16 @@ def send_auto_qr_screen(chat_id, message_id=None, amount=5):
 
     bot.send_photo(chat_id, qr_url, caption=caption, parse_mode="HTML", reply_markup=markup)
 
-# ----------------- VEHICLE DATA FETCHER (ROBUST) -----------------
-def safe_str(val, default='N/A'):
+# ----------------- VEHICLE DATA FETCHER -----------------
+def safe_clean(val, default='N/A'):
     if val in [None, '', 'null', 'None', 'N/A']:
         return default
-    return str(val).strip()
+    return html.escape(str(val).strip())
 
 def get_vehicle_data(rc):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
-        response = requests.get(VEHICLE_API + rc, headers=headers, timeout=6)
+        response = requests.get(VEHICLE_API + rc, headers=headers, timeout=12)
         if response.status_code != 200:
             return None
             
@@ -174,20 +175,20 @@ def get_vehicle_data(rc):
         status = data.get('status') or data.get('Status') or data.get('rc_status') or v.get('Status') or 'ACTIVE'
 
         return {
-            'owner': safe_str(owner),
-            'father': safe_str(father),
-            'reg_no': safe_str(reg_no),
-            'reg_date': safe_str(reg_date),
-            'rto': safe_str(rto),
-            'model': safe_str(model),
-            'fuel': safe_str(fuel),
-            'engine': safe_str(engine),
-            'chassis': safe_str(chassis),
-            'ins_company': safe_str(ins_comp),
-            'ins_valid': safe_str(ins_valid),
-            'present_addr': safe_str(present_addr),
-            'mobile': safe_str(mobile),
-            'status': safe_str(status)
+            'owner': safe_clean(owner),
+            'father': safe_clean(father),
+            'reg_no': safe_clean(reg_no),
+            'reg_date': safe_clean(reg_date),
+            'rto': safe_clean(rto),
+            'model': safe_clean(model),
+            'fuel': safe_clean(fuel),
+            'engine': safe_clean(engine),
+            'chassis': safe_clean(chassis),
+            'ins_company': safe_clean(ins_comp),
+            'ins_valid': safe_clean(ins_valid),
+            'present_addr': safe_clean(present_addr),
+            'mobile': safe_clean(mobile),
+            'status': safe_clean(status)
         }
     except Exception:
         return None
@@ -195,7 +196,7 @@ def get_vehicle_data(rc):
 # ----------------- BOT COMMANDS & UI -----------------
 @bot.message_handler(commands=['start'])
 def start_msg(message):
-    name = message.from_user.first_name or "User"
+    name = html.escape(message.from_user.first_name or "User")
     credits = get_user_credits(message.chat.id)
 
     welcome_text = (
@@ -227,7 +228,7 @@ def auto_verify_payment(call):
 
     try:
         url = f"{VERIFY_API_URL}/?id={PAYTM_MID}&trn={order_id}"
-        response = requests.post(url, timeout=7)
+        response = requests.post(url, timeout=10)
         data = response.json()
 
         stat = data.get("STATUS", "")
@@ -360,43 +361,43 @@ def process_vehicle_search(message):
 
     load_msg = bot.reply_to(message, f"🔍 Searching details for <code>{rc}</code>... (-1 Credit)", parse_mode="HTML")
     
+    reg = get_vehicle_data(rc)
+    if not reg:
+        bot.edit_message_text(f"❌ RC <code>{rc}</code> records nahi mile. Balance deduct nahi hua.", chat_id=user_id, message_id=load_msg.message_id, parse_mode="HTML")
+        return
+
+    remaining = update_user_credits(user_id, -1)
+
+    res = (
+        "🚗 <b>VEHICLE RC DETAILS</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "👤 <b>OWNER DETAILS</b>\n"
+        f"• <b>Owner Name:</b> {reg['owner']}\n"
+        f"• <b>Father Name:</b> {reg['father']}\n"
+        f"• 📱 <b>Mobile No:</b> <code>{reg['mobile']}</code>\n"
+        f"• <b>Status:</b> {reg['status']}\n\n"
+        "📋 <b>REGISTRATION</b>\n"
+        f"• <b>RC Number:</b> {reg['reg_no']}\n"
+        f"• <b>Reg Date:</b> {reg['reg_date']}\n"
+        f"• <b>RTO Authority:</b> {reg['rto']}\n\n"
+        "🚘 <b>SPECIFICATIONS</b>\n"
+        f"• <b>Model:</b> {reg['model']}\n"
+        f"• <b>Fuel:</b> {reg['fuel']}\n"
+        f"• <b>Engine No:</b> <code>{reg['engine']}</code>\n"
+        f"• <b>Chassis No:</b> <code>{reg['chassis']}</code>\n\n"
+        "🛡️ <b>INSURANCE</b>\n"
+        f"• <b>Company:</b> {reg['ins_company']}\n"
+        f"• <b>Valid Till:</b> {reg['ins_valid']}\n\n"
+        "🏠 <b>ADDRESS</b>\n"
+        f"• <b>Present:</b> {reg['present_addr']}\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💰 <b>Remaining Balance:</b> {remaining} Credits"
+    )
+
     try:
-        reg = get_vehicle_data(rc)
-        if not reg:
-            bot.edit_message_text(f"❌ RC <code>{rc}</code> records nahi mile. Balance deduct nahi hua.", chat_id=user_id, message_id=load_msg.message_id, parse_mode="HTML")
-            return
-
-        remaining = update_user_credits(user_id, -1)
-
-        res = (
-            "🚗 <b>VEHICLE RC DETAILS</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "👤 <b>OWNER DETAILS</b>\n"
-            f"• <b>Owner Name:</b> {reg['owner']}\n"
-            f"• <b>Father Name:</b> {reg['father']}\n"
-            f"• 📱 <b>Mobile No:</b> <code>{reg['mobile']}</code>\n"
-            f"• <b>Status:</b> {reg['status']}\n\n"
-            "📋 <b>REGISTRATION</b>\n"
-            f"• <b>RC Number:</b> {reg['reg_no']}\n"
-            f"• <b>Reg Date:</b> {reg['reg_date']}\n"
-            f"• <b>RTO Authority:</b> {reg['rto']}\n\n"
-            "🚘 <b>SPECIFICATIONS</b>\n"
-            f"• <b>Model:</b> {reg['model']}\n"
-            f"• <b>Fuel:</b> {reg['fuel']}\n"
-            f"• <b>Engine No:</b> <code>{reg['engine']}</code>\n"
-            f"• <b>Chassis No:</b> <code>{reg['chassis']}</code>\n\n"
-            "🛡️ <b>INSURANCE</b>\n"
-            f"• <b>Company:</b> {reg['ins_company']}\n"
-            f"• <b>Valid Till:</b> {reg['ins_valid']}\n\n"
-            "🏠 <b>ADDRESS</b>\n"
-            f"• <b>Present:</b> {reg['present_addr']}\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"💰 <b>Remaining Balance:</b> {remaining} Credits"
-        )
-
         bot.edit_message_text(res, chat_id=user_id, message_id=load_msg.message_id, parse_mode="HTML", reply_markup=get_main_menu(user_id))
-    except Exception as e:
-        bot.edit_message_text(f"❌ Error aayi details process karne me.", chat_id=user_id, message_id=load_msg.message_id)
+    except Exception:
+        bot.edit_message_text(res.replace("<b>", "").replace("</b>", "").replace("<code>", "").replace("</code>", "").replace("<i>", "").replace("</i>", ""), chat_id=user_id, message_id=load_msg.message_id, reply_markup=get_main_menu(user_id))
 
 if __name__ == '__main__':
     bot.infinity_polling()
