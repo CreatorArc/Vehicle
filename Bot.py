@@ -31,7 +31,7 @@ PAYTM_UPI = "paytmqr2810050501011gv6cueh16my@paytm"
 
 QR_API_URL = "https://paytms.aimbotaxe4.workers.dev"
 VERIFY_API_URL = "https://paytmv.aimbotaxe4.workers.dev"
-VEHICLE_API = "https://vehicle-chass.vercel.app/api/vehicle?rc="
+VEHICLE_API = "https://vehicle-eight-vert.vercel.app/api?rc="
 
 bot = telebot.TeleBot(BOT_TOKEN)
 bot.remove_webhook()
@@ -136,45 +136,39 @@ def safe_get(d, key, default='N/A'):
     return default if (val == '' or val is None) else str(val)
 
 def get_vehicle_data(rc):
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
-        response = requests.get(VEHICLE_API + rc, timeout=25)
+        response = requests.get(VEHICLE_API + rc, headers=headers, timeout=20)
         data = response.json()
-        if not data.get('success', False):
+        if not data or data.get('error'):
             return None, None
 
-        v = data.get('vehicle', {})
-        s = data.get('specifications', {})
-        ins = data.get('insurance', {})
-        addr = data.get('address', {})
-        pol = data.get('pollution', {})
-
-        chassis = s.get('Chassis Number', '')
-        if not chassis:
-            return None, None
-
+        chassis = data.get('chassis_no') or data.get('ChassisNumber') or data.get('chassis') or ''
+        
         reg = {
-            'reg_no': v.get('Registration Number', ''),
-            'owner': v.get('Owner', ''),
-            'father': v.get('Father Name', ''),
-            'owner_type': v.get('Owner Type', ''),
-            'status': v.get('Status', ''),
-            'reg_authority': v.get('Registration Authority', ''),
-            'reg_date': v.get('Registration Date', ''),
-            'rc_expiry': v.get('RC Expiry', ''),
-            'manufacturer': s.get('Manufacturer', ''),
-            'model': s.get('Model', ''),
-            'vehicle_class': s.get('Vehicle Class', ''),
-            'fuel': s.get('Fuel Type', ''),
-            'engine': s.get('Engine Number', ''),
-            'chassis': chassis,
-            'ins_company': ins.get('Company', ''),
-            'ins_policy': ins.get('Policy Number', ''),
-            'ins_valid': ins.get('Valid Till', ''),
-            'pucc_valid': pol.get('PUCC Valid Till', ''),
-            'present_addr': addr.get('Present Address', ''),
-            'perm_addr': addr.get('Permanent Address', '')
+            'reg_no': data.get('reg_no') or data.get('RegistrationNumber') or rc,
+            'owner': data.get('owner_name') or data.get('OwnerName') or data.get('owner') or 'N/A',
+            'father': data.get('father_name') or data.get('FatherName') or 'N/A',
+            'owner_type': data.get('owner_type', 'N/A'),
+            'status': data.get('status', 'Active'),
+            'reg_authority': data.get('rto') or data.get('RegistrationAuthority') or 'N/A',
+            'reg_date': data.get('reg_date') or data.get('RegistrationDate') or 'N/A',
+            'rc_expiry': data.get('rc_expiry') or data.get('FitnessValidTill') or 'N/A',
+            'manufacturer': data.get('maker') or data.get('Manufacturer') or '',
+            'model': data.get('maker_model') or data.get('Model') or data.get('model') or '',
+            'vehicle_class': data.get('vehicle_class') or data.get('VehicleClass') or 'N/A',
+            'fuel': data.get('fuel_type') or data.get('FuelType') or data.get('fuel') or 'N/A',
+            'engine': data.get('engine_no') or data.get('EngineNumber') or data.get('engine') or 'N/A',
+            'chassis': chassis if chassis else 'N/A',
+            'ins_company': data.get('insurance_company') or data.get('InsuranceCompany') or 'N/A',
+            'ins_policy': data.get('insurance_policy') or data.get('PolicyNumber') or 'N/A',
+            'ins_valid': data.get('insurance_valid_till') or data.get('InsuranceValidTill') or 'N/A',
+            'pucc_valid': data.get('pucc_valid') or data.get('PUCCValidTill') or 'N/A',
+            'present_addr': data.get('address') or data.get('PresentAddress') or 'N/A',
+            'perm_addr': data.get('permanent_address') or data.get('PermanentAddress') or 'N/A'
         }
-        return chassis[-5:], reg
+        last5 = chassis[-5:] if len(chassis) >= 5 else "00000"
+        return last5, reg
     except Exception:
         return None, None
 
@@ -198,9 +192,9 @@ def get_mobile(rc, last5):
     LI = 'https://vahan.parivahan.gov.in/vahanservice/vahan/ui/usermgmt/login.xhtml'
     FR = 'https://vahan.parivahan.gov.in/vahanservice/vahan/ui/balanceservice/form_reschedule_fitness.xhtml'
 
-    for attempt in range(3):
+    for attempt in range(2):
         try:
-            r = session.get(HP, timeout=25)
+            r = session.get(HP, timeout=20)
             vs = re.search(r'<input[^>]*name="javax\.faces\.ViewState"[^>]*value="([^"]+)"', r.text)
             if not vs:
                 time.sleep(1)
@@ -229,7 +223,7 @@ def get_mobile(rc, last5):
                 'homepageformid': 'homepageformid',
                 'fit_c_office_to_input': '1',
                 'javax.faces.ViewState': vs
-            }, timeout=20)
+            }, timeout=15)
             m = re.search(r'<update id="j_id1:javax\.faces\.ViewState:0"><!\[CDATA\[(.*?)\]\]></update>', r.text)
             if m: vs = m.group(1)
 
@@ -242,7 +236,7 @@ def get_mobile(rc, last5):
                 'homepageformid': 'homepageformid',
                 f'{cid}_input': 'on',
                 'javax.faces.ViewState': vs
-            }, timeout=20)
+            }, timeout=15)
             m = re.search(r'<update id="j_id1:javax\.faces\.ViewState:0"><!\[CDATA\[(.*?)\]\]></update>', r.text)
             if m: vs = m.group(1)
 
@@ -254,7 +248,7 @@ def get_mobile(rc, last5):
                 'homepageformid': 'homepageformid',
                 f'{cid}_input': 'on',
                 'javax.faces.ViewState': vs
-            }, timeout=20)
+            }, timeout=15)
             m = re.search(r'<update id="j_id1:javax\.faces\.ViewState:0"><!\[CDATA\[(.*?)\]\]></update>', r.text)
             if m: vs = m.group(1)
 
@@ -270,11 +264,11 @@ def get_mobile(rc, last5):
                 'homepageformid': 'homepageformid',
                 f'{cid}_input': 'on',
                 'javax.faces.ViewState': vs
-            }, timeout=20)
+            }, timeout=15)
             m = re.search(r'<update id="j_id1:javax\.faces\.ViewState:0"><!\[CDATA\[(.*?)\]\]></update>', r.text)
             if m: vs = m.group(1)
 
-            r = session.get(LI + '?faces-redirect=true', headers={**headers, 'Referer': HP}, timeout=20)
+            r = session.get(LI + '?faces-redirect=true', headers={**headers, 'Referer': HP}, timeout=15)
             vs = re.search(r'<input[^>]*name="javax\.faces\.ViewState"[^>]*value="([^"]+)"', r.text)
             if not vs:
                 time.sleep(1)
@@ -296,9 +290,9 @@ def get_mobile(rc, last5):
                 'javax.faces.ViewState': vs,
                 'fitbalcTest': 'fitbalcTest',
                 'pur_cd': '86'
-            }, timeout=20)
+            }, timeout=15)
 
-            r = session.get(FR, headers={**headers, 'Referer': LI + '?faces-redirect=true'}, timeout=20)
+            r = session.get(FR, headers={**headers, 'Referer': LI + '?faces-redirect=true'}, timeout=15)
             vs = re.search(r'<input[^>]*name="javax\.faces\.ViewState"[^>]*value="([^"]+)"', r.text)
             if not vs:
                 time.sleep(1)
@@ -315,7 +309,7 @@ def get_mobile(rc, last5):
                 'balanceFeesFine:tf_reg_no': rc,
                 'balanceFeesFine:tf_chasis_no': last5,
                 'javax.faces.ViewState': vs
-            }, timeout=20)
+            }, timeout=15)
 
             patterns = [
                 r'id="balanceFeesFine:tf_mobile"[^>]*value="(\d{10})"',
@@ -332,9 +326,9 @@ def get_mobile(rc, last5):
                 return {'success': True, 'mobile': nums[0], 'chassis_last5': last5}
 
         except Exception as err:
-            print(f"Fetch Error (Attempt {attempt+1}): {err}")
+            print(f"Fetch Error: {err}")
         
-        time.sleep(2)
+        time.sleep(1)
 
     return {'success': False, 'mobile': 'Not Available', 'chassis_last5': last5}
 
@@ -349,11 +343,11 @@ def start_msg(message):
 
     welcome_text = (
         f"👋 *Welcome {message.from_user.first_name}*\n\n"
-        "🚗 *Vehicle RC & Owner Number Finder Bot*\n\n"
+        "🚗 *Vehicle RC & Owner Details Finder Bot*\n\n"
         f"• *Current Balance:* `{credits}` Credits\n"
         "• *Charge:* 1 Search = 5₹ (1 Credit)\n\n"
         "👉 *Redeem Coupon:* `/redeem <code>`\n\n"
-        "👇 _Gaadi ka RC number bhej kar search karein (e.g. DL01AB1234)_"
+        "👇 _Gaadi ka RC number bhej kar search karein (e.g. KL43G1669)_"
     )
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
 
@@ -507,7 +501,7 @@ def process_vehicle_search(message):
     rc = re.sub(r'[^A-Z0-9]', '', raw.upper())
 
     if len(rc) < 6 or len(rc) > 12:
-        bot.reply_to(message, "⚠️ Sahi RC format bhejain (e.g. `DL01AB1234`).", parse_mode="Markdown")
+        bot.reply_to(message, "⚠️ Sahi RC format bhejain (e.g. `KL43G1669`).", parse_mode="Markdown")
         return
 
     if credits < 1:
@@ -518,8 +512,8 @@ def process_vehicle_search(message):
     load_msg = bot.reply_to(message, f"🔍 Searching details for `{rc}`... (-1 Credit)")
 
     last5, reg = get_vehicle_data(rc)
-    if not last5:
-        bot.edit_message_text(f"❌ RC `{rc}` nahi mili. Balance deduct nahi hua.", chat_id=message.chat.id, message_id=load_msg.message_id)
+    if not reg:
+        bot.edit_message_text(f"❌ RC `{rc}` records nahi mile. Balance deduct nahi hua.", chat_id=message.chat.id, message_id=load_msg.message_id)
         return
 
     remaining = update_user_credits(user_id, -1)
@@ -544,7 +538,7 @@ def process_vehicle_search(message):
         f"• *Model:* {safe_get(reg, 'manufacturer')} {safe_get(reg, 'model')}\n"
         f"• *Fuel:* {safe_get(reg, 'fuel')}\n"
         f"• *Engine No:* `{safe_get(reg, 'engine')}`\n"
-        f"• *Chassis No:* `***{last5_show}`\n\n"
+        f"• *Chassis No:* `{safe_get(reg, 'chassis')}`\n\n"
         "🛡️ *INSURANCE*\n"
         f"• *Company:* {safe_get(reg, 'ins_company')}\n"
         f"• *Valid Till:* {safe_get(reg, 'ins_valid')}\n\n"
